@@ -19,7 +19,7 @@ require (
 	github.com/johannesboyne/gofakes3 v0.0.0-20220517215058-83a58ec253b6
 	github.com/matoous/go-nanoid/v2 v2.0.0
 	github.com/ncw/swift/v2 v2.0.1
-	github.com/newrelic/go-agent/v3 v3.16.1
+	github.com/newrelic/go-agent/v3 v3.17.0
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/prometheus/client_golang v1.12.2
 	github.com/sirupsen/logrus v1.8.1
