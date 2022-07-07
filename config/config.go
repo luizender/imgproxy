@@ -128,7 +128,8 @@ var (
 	FallbackImageHTTPCode int
 	FallbackImageTTL      int
 
-	DataDogEnable bool
+	DataDogEnable        bool
+	DataDogEnableMetrics bool
 
 	NewRelicAppName string
 	NewRelicKey     string
@@ -457,6 +458,7 @@ func Configure() error {
 	configurators.Int(&FallbackImageTTL, "IMGPROXY_FALLBACK_IMAGE_TTL")
 
 	configurators.Bool(&DataDogEnable, "IMGPROXY_DATADOG_ENABLE")
+	configurators.Bool(&DataDogEnableMetrics, "IMGPROXY_DATADOG_ENABLE_ADDITIONAL_METRICS")
 
 	configurators.String(&NewRelicAppName, "IMGPROXY_NEW_RELIC_APP_NAME")
 	configurators.String(&NewRelicKey, "IMGPROXY_NEW_RELIC_KEY")
