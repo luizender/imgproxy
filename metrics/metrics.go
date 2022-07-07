@@ -23,6 +23,7 @@ func Init() error {
 }
 
 func Stop() {
+	newrelic.Stop()
 	datadog.Stop()
 }
 
@@ -88,15 +89,18 @@ func SendTimeout(ctx context.Context, d time.Duration) {
 
 func ObserveBufferSize(t string, size int) {
 	prometheus.ObserveBufferSize(t, size)
+	newrelic.ObserveBufferSize(t, size)
 	datadog.ObserveBufferSize(t, size)
 }
 
 func SetBufferDefaultSize(t string, size int) {
 	prometheus.SetBufferDefaultSize(t, size)
+	newrelic.SetBufferDefaultSize(t, size)
 	datadog.SetBufferDefaultSize(t, size)
 }
 
 func SetBufferMaxSize(t string, size int) {
 	prometheus.SetBufferMaxSize(t, size)
+	newrelic.SetBufferMaxSize(t, size)
 	datadog.SetBufferMaxSize(t, size)
 }

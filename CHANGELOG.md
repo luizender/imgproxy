@@ -5,6 +5,7 @@
 - Add support of 16-bit BMP.
 - Add `IMGPROXY_NEW_RELIC_LABELS` config.
 - Add sending additional metrics to Datadog and `IMGPROXY_DATADOG_ENABLE_ADDITIONAL_METRICS` config.
+- Add sending additional metrics to New Relic.
 
 ### Fix
 - Fix trimming of CMYK images.
