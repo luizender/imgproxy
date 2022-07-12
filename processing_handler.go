@@ -18,6 +18,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/imagedata"
 	"github.com/imgproxy/imgproxy/v3/imagetype"
 	"github.com/imgproxy/imgproxy/v3/metrics"
+	"github.com/imgproxy/imgproxy/v3/metrics/stats"
 	"github.com/imgproxy/imgproxy/v3/options"
 	"github.com/imgproxy/imgproxy/v3/processing"
 	"github.com/imgproxy/imgproxy/v3/router"
@@ -145,6 +146,9 @@ func respondWithNotModified(reqID string, r *http.Request, rw http.ResponseWrite
 }
 
 func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
+	stats.IncRequestsInProgress()
+	defer stats.DecRequestsInProgress()
+
 	ctx := r.Context()
 
 	path := r.RequestURI
@@ -203,15 +207,22 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 	}
 
 	// The heavy part start here, so we need to restrict concurrency
-	select {
-	case processingSem <- struct{}{}:
-	case <-ctx.Done():
-		// We don't actually need to check timeout here,
-		// but it's an easy way to check if this is an actual timeout
-		// or the request was cancelled
-		router.CheckTimeout(ctx)
-	}
+	func() {
+		defer metrics.StartQueueSegment(ctx)()
+
+		select {
+		case processingSem <- struct{}{}:
+		case <-ctx.Done():
+			// We don't actually need to check timeout here,
+			// but it's an easy way to check if this is an actual timeout
+			// or the request was cancelled
+			router.CheckTimeout(ctx)
+		}
+	}()
 	defer func() { <-processingSem }()
+
+	stats.IncImagesInProgress()
+	defer stats.DecImagesInProgress()
 
 	statusCode := http.StatusOK
 

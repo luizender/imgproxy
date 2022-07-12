@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/imgproxy/imgproxy/v3/config"
+	"github.com/imgproxy/imgproxy/v3/metrics/stats"
 )
 
 type transactionCtxKey struct{}
@@ -257,6 +258,18 @@ func runMetricsCollector() {
 					summary.Max = 0
 				}
 			}()
+
+			harvester.RecordMetric(telemetry.Gauge{
+				Name:      "imgproxy.requests_in_progress",
+				Value:     stats.RequestsInProgress(),
+				Timestamp: time.Now(),
+			})
+
+			harvester.RecordMetric(telemetry.Gauge{
+				Name:      "imgproxy.images_in_progress",
+				Value:     stats.ImagesInProgress(),
+				Timestamp: time.Now(),
+			})
 
 			harvester.HarvestNow(harvesterCtx)
 		case <-harvesterCtx.Done():
