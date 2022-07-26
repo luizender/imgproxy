@@ -88,6 +88,14 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 }
 
 func watermark(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
+	if len(po.WatermarkURL) > 0 {
+		imgData, err := imagedata.Download(po.WatermarkURL, "url_watermark", nil, nil)
+		if err != nil {
+			return err
+		}
+		return applyWatermark(img, imgData, &po.Watermark, 1)
+	}
+
 	if !po.Watermark.Enabled || imagedata.Watermark == nil {
 		return nil
 	}

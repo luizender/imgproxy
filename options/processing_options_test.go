@@ -306,6 +306,15 @@ func (s *ProcessingOptionsTestSuite) TestParsePathWatermark() {
 	require.Equal(s.T(), 0.6, po.Watermark.Scale)
 }
 
+func (s *ProcessingOptionsTestSuite) TestParsePathURLWatermark() {
+	path := "/watermark_url:https%3A%2F%2Fi.stack.imgur.com%2F59ND2.png/plain/http://images.dev/lorem/ipsum.jpg"
+	po, _, err := ParsePath(path, make(http.Header))
+
+	require.Nil(s.T(), err)
+
+	require.Equal(s.T(), "https://i.stack.imgur.com/59ND2.png", po.WatermarkURL)
+}
+
 func (s *ProcessingOptionsTestSuite) TestParsePathPreset() {
 	presets["test1"] = urlOptions{
 		urlOption{Name: "resizing_type", Args: []string{"fill"}},

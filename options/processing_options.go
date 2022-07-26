@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,6 +97,8 @@ type ProcessingOptions struct {
 	CacheBuster string
 
 	Watermark WatermarkOptions
+
+	WatermarkURL string
 
 	PreferWebP  bool
 	EnforceWebP bool
@@ -748,6 +751,20 @@ func applyWatermarkOption(po *ProcessingOptions, args []string) error {
 	return nil
 }
 
+func applyURLWatermarkOption(po *ProcessingOptions, args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("Invalid watermark url arguments: %v", args)
+	}
+
+	if decoded, err := url.QueryUnescape(args[0]); err == nil {
+		po.WatermarkURL = decoded
+	} else {
+		return fmt.Errorf("Invalid watermark url: %s", args[0])
+	}
+
+	return nil
+}
+
 func applyFormatOption(po *ProcessingOptions, args []string) error {
 	if len(args) > 1 {
 		return fmt.Errorf("Invalid format arguments: %v", args)
@@ -917,6 +934,8 @@ func applyURLOption(po *ProcessingOptions, name string, args []string) error {
 		return applyPixelateOption(po, args)
 	case "watermark", "wm":
 		return applyWatermarkOption(po, args)
+	case "watermark_url", "wmu":
+		return applyURLWatermarkOption(po, args)
 	case "strip_metadata", "sm":
 		return applyStripMetadataOption(po, args)
 	case "keep_copyright", "kcr":

@@ -54,11 +54,11 @@ rt:%resizing_type
 
 Defines how imgproxy will resize the source image. Supported resizing types are:
 
-* `fit`: resizes the image while keeping aspect ratio to fit a given size.
-* `fill`: resizes the image while keeping aspect ratio to fill a given size and crops projecting parts.
-* `fill-down`: the same as `fill`, but if the resized image is smaller than the requested size, imgproxy will crop the result to keep the requested aspect ratio.
-* `force`: resizes the image without keeping the aspect ratio.
-* `auto`: if both source and resulting dimensions have the same orientation (portrait or landscape), imgproxy will use `fill`. Otherwise, it will use `fit`.
+- `fit`: resizes the image while keeping aspect ratio to fit a given size.
+- `fill`: resizes the image while keeping aspect ratio to fill a given size and crops projecting parts.
+- `fill-down`: the same as `fill`, but if the resized image is smaller than the requested size, imgproxy will crop the result to keep the requested aspect ratio.
+- `force`: resizes the image without keeping the aspect ratio.
+- `auto`: if both source and resulting dimensions have the same orientation (portrait or landscape), imgproxy will use `fill`. Otherwise, it will use `fit`.
 
 Default: `fit`
 
@@ -169,8 +169,8 @@ extend:%extend:%gravity
 ex:%extend:%gravity
 ```
 
-* When `extend` is set to `1`, `t` or `true`, imgproxy will extend the image if it is smaller than the given size.
-* `gravity` _(optional)_ accepts the same values as the [gravity](#gravity) option, except `sm`. When `gravity` is not set, imgproxy will use `ce` gravity without offsets.
+- When `extend` is set to `1`, `t` or `true`, imgproxy will extend the image if it is smaller than the given size.
+- `gravity` _(optional)_ accepts the same values as the [gravity](#gravity) option, except `sm`. When `gravity` is not set, imgproxy will use `ce` gravity without offsets.
 
 Default: `false:ce:0:0`
 
@@ -183,25 +183,25 @@ g:%type:%x_offset:%y_offset
 
 When imgproxy needs to cut some parts of the image, it is guided by the gravity option.
 
-* `type` - specifies the gravity type. Available values:
-  * `no`: north (top edge)
-  * `so`: south (bottom edge)
-  * `ea`: east (right edge)
-  * `we`: west (left edge)
-  * `noea`: north-east (top-right corner)
-  * `nowe`: north-west (top-left corner)
-  * `soea`: south-east (bottom-right corner)
-  * `sowe`: south-west (bottom-left corner)
-  * `ce`: center
-* `x_offset`, `y_offset` - (optional) specifies the gravity offset along the X and Y axes.
+- `type` - specifies the gravity type. Available values:
+  - `no`: north (top edge)
+  - `so`: south (bottom edge)
+  - `ea`: east (right edge)
+  - `we`: west (left edge)
+  - `noea`: north-east (top-right corner)
+  - `nowe`: north-west (top-left corner)
+  - `soea`: south-east (bottom-right corner)
+  - `sowe`: south-west (bottom-left corner)
+  - `ce`: center
+- `x_offset`, `y_offset` - (optional) specifies the gravity offset along the X and Y axes.
 
 Default: `ce:0:0`
 
 **Special gravities**:
 
-* `gravity:sm`: smart gravity. `libvips` detects the most "interesting" section of the image and considers it as the center of the resulting image. Offsets are not applicable here.
-* `gravity:obj:%class_name1:%class_name2:...:%class_nameN`: ![pro](/assets/pro.svg) object-oriented gravity. imgproxy [detects objects](object_detection.md) of provided classes on the image and calculates the resulting image center using their positions. If class names are omited, imgproxy will use all the detected objects.
-* `gravity:fp:%x:%y`: the gravity focus point . `x` and `y` are floating point numbers between 0 and 1 that define the coordinates of the center of the resulting image. Treat 0 and 1 as right/left for `x` and top/bottom for `y`.
+- `gravity:sm`: smart gravity. `libvips` detects the most "interesting" section of the image and considers it as the center of the resulting image. Offsets are not applicable here.
+- `gravity:obj:%class_name1:%class_name2:...:%class_nameN`: ![pro](/assets/pro.svg) object-oriented gravity. imgproxy [detects objects](object_detection.md) of provided classes on the image and calculates the resulting image center using their positions. If class names are omited, imgproxy will use all the detected objects.
+- `gravity:fp:%x:%y`: the gravity focus point . `x` and `y` are floating point numbers between 0 and 1 that define the coordinates of the center of the resulting image. Treat 0 and 1 as right/left for `x` and top/bottom for `y`.
 
 ### Crop
 
@@ -212,11 +212,11 @@ c:%width:%height:%gravity
 
 Defines an area of the image to be processed (crop before resize).
 
-* `width` and `height` define the size of the area:
-  * When `width` or `height` is greater than or equal to `1`, imgproxy treats it as an absolute value.
-  * When `width` or `height` is less than `1`, imgproxy treats it as a relative value.
-  * When `width` or `height` is set to `0`, imgproxy will use the full width/height of the source image.
-* `gravity` _(optional)_ accepts the same values as the [gravity](#gravity) option. When `gravity` is not set, imgproxy will use the value of the [gravity](#gravity) option.
+- `width` and `height` define the size of the area:
+  - When `width` or `height` is greater than or equal to `1`, imgproxy treats it as an absolute value.
+  - When `width` or `height` is less than `1`, imgproxy treats it as a relative value.
+  - When `width` or `height` is set to `0`, imgproxy will use the full width/height of the source image.
+- `gravity` _(optional)_ accepts the same values as the [gravity](#gravity) option. When `gravity` is not set, imgproxy will use the value of the [gravity](#gravity) option.
 
 ### Trim
 
@@ -227,10 +227,10 @@ t:%threshold:%color:%equal_hor:%equal_ver
 
 Removes surrounding background.
 
-* `threshold` - color similarity tolerance.
-* `color` - _(optional)_ a hex-coded value of the color that needs to be cut off.
-* `equal_hor` - _(optional)_ set to `1`, `t` or `true`, imgproxy will cut only equal parts from left and right sides. That means that if 10px of background can be cut off from the left and 5px from the right, then 5px will be cut off from both sides. For example, this can be useful if objects on your images are centered but have non-symmetrical shadow.
-* `equal_ver` - _(optional)_ acts like `equal_hor` but for top/bottom sides.
+- `threshold` - color similarity tolerance.
+- `color` - _(optional)_ a hex-coded value of the color that needs to be cut off.
+- `equal_hor` - _(optional)_ set to `1`, `t` or `true`, imgproxy will cut only equal parts from left and right sides. That means that if 10px of background can be cut off from the left and 5px from the right, then 5px will be cut off from both sides. For example, this can be useful if objects on your images are centered but have non-symmetrical shadow.
+- `equal_ver` - _(optional)_ acts like `equal_hor` but for top/bottom sides.
 
 **⚠️Warning:** Trimming requires an image to be fully loaded into memory. This disables scale-on-load and significantly increases memory usage and processing time. Use it carefully with large images.
 
@@ -249,10 +249,10 @@ pd:%top:%right:%bottom:%left
 
 Defines padding size using CSS-style syntax. All arguments are optional but at least one dimension must be set. Padded space is filled according to the [background](#background) option.
 
-* `top` - top padding (and for all other sides if they haven't been explicitly st)
-* `right` - right padding (and left if it hasn't been explicitly set)
-* `bottom` - bottom padding
-* `left` - left padding
+- `top` - top padding (and for all other sides if they haven't been explicitly st)
+- `right` - right padding (and left if it hasn't been explicitly set)
+- `bottom` - bottom padding
+- `left` - left padding
 
 **📝Note:** Padding is applied after all image transformations (except watermarking) and enlarges the generated image. This means that if your resize dimensions were 100x200px and you applied the `padding:10` option, then you will end up with an image with dimensions of 120x220px.
 
@@ -422,20 +422,20 @@ wm:%opacity:%position:%x_offset:%y_offset:%scale
 
 Places a watermark on the processed image.
 
-* `opacity`: watermark opacity modifier. Final opacity is calculated like `base_opacity * opacity`.
-* `position`: (optional) specifies the position of the watermark. Available values:
-  * `ce`: (default) center
-  * `no`: north (top edge)
-  * `so`: south (bottom edge)
-  * `ea`: east (right edge)
-  * `we`: west (left edge)
-  * `noea`: north-east (top-right corner)
-  * `nowe`: north-west (top-left corner)
-  * `soea`: south-east (bottom-right corner)
-  * `sowe`: south-west (bottom-left corner)
-  * `re`: repeat and tile the watermark to fill the entire image
-* `x_offset`, `y_offset` - (optional) specify watermark offset by X and Y axes. When using `re` position, these values define the spacing between the tiles.
-* `scale`: (optional) a floating-point number that defines the watermark size relative to the resultant image size. When set to `0` or when omitted, the watermark size won't be changed.
+- `opacity`: watermark opacity modifier. Final opacity is calculated like `base_opacity * opacity`.
+- `position`: (optional) specifies the position of the watermark. Available values:
+  - `ce`: (default) center
+  - `no`: north (top edge)
+  - `so`: south (bottom edge)
+  - `ea`: east (right edge)
+  - `we`: west (left edge)
+  - `noea`: north-east (top-right corner)
+  - `nowe`: north-west (top-left corner)
+  - `soea`: south-east (bottom-right corner)
+  - `sowe`: south-west (bottom-left corner)
+  - `re`: repeat and tile the watermark to fill the entire image
+- `x_offset`, `y_offset` - (optional) specify watermark offset by X and Y axes. When using `re` position, these values define the spacing between the tiles.
+- `scale`: (optional) a floating-point number that defines the watermark size relative to the resultant image size. When set to `0` or when omitted, the watermark size won't be changed.
 
 Default: disabled
 
