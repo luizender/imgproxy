@@ -58,6 +58,7 @@ type WatermarkOptions struct {
 	Replicate bool
 	Gravity   GravityOptions
 	Scale     float64
+	ImageURL  string
 }
 
 type ProcessingOptions struct {
@@ -97,8 +98,6 @@ type ProcessingOptions struct {
 	CacheBuster string
 
 	Watermark WatermarkOptions
-
-	WatermarkURL string
 
 	PreferWebP  bool
 	EnforceWebP bool
@@ -757,7 +756,7 @@ func applyURLWatermarkOption(po *ProcessingOptions, args []string) error {
 	}
 
 	if decoded, err := url.QueryUnescape(args[0]); err == nil {
-		po.WatermarkURL = decoded
+		po.Watermark.ImageURL = decoded
 	} else {
 		return fmt.Errorf("Invalid watermark url: %s", args[0])
 	}

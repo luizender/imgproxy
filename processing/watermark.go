@@ -72,6 +72,13 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 	width := img.Width()
 	height := img.Height()
 
+	if len(opts.ImageURL) > 0 {
+		var err error
+		if wmData, err = imagedata.Download(opts.ImageURL, "watermark_url", nil, nil); err != nil {
+			return err
+		}
+	}
+
 	if err := prepareWatermark(wm, wmData, opts, width, height/framesCount); err != nil {
 		return err
 	}
@@ -88,15 +95,7 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 }
 
 func watermark(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if len(po.WatermarkURL) > 0 {
-		imgData, err := imagedata.Download(po.WatermarkURL, "url_watermark", nil, nil)
-		if err != nil {
-			return err
-		}
-		return applyWatermark(img, imgData, &po.Watermark, 1)
-	}
-
-	if !po.Watermark.Enabled || imagedata.Watermark == nil {
+	if !po.Watermark.Enabled || (len(po.Watermark.ImageURL) <= 0 && imagedata.Watermark == nil) {
 		return nil
 	}
 

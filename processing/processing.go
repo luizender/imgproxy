@@ -172,18 +172,8 @@ func transformAnimated(ctx context.Context, img *vips.Image, po *options.Process
 		return err
 	}
 
-	if watermarkEnabled && imagedata.Watermark != nil {
-		var wmData *imagedata.ImageData
-		if len(po.WatermarkURL) > 0 {
-			wmData, err = imagedata.Download(po.WatermarkURL, "url_watermark", nil, nil)
-			if err != nil {
-				return err
-			}
-		} else {
-			wmData = imagedata.Watermark
-		}
-
-		if err = applyWatermark(img, wmData, &po.Watermark, framesCount); err != nil {
+	if watermarkEnabled && (len(po.Watermark.ImageURL) > 0 || imagedata.Watermark != nil) {
+		if err = applyWatermark(img, imagedata.Watermark, &po.Watermark, framesCount); err != nil {
 			return err
 		}
 	}

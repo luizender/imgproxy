@@ -312,7 +312,7 @@ func (s *ProcessingOptionsTestSuite) TestParsePathURLWatermark() {
 
 	require.Nil(s.T(), err)
 
-	require.Equal(s.T(), "https://i.stack.imgur.com/59ND2.png", po.WatermarkURL)
+	require.Equal(s.T(), "https://i.stack.imgur.com/59ND2.png", po.Watermark.ImageURL)
 }
 
 func (s *ProcessingOptionsTestSuite) TestParsePathPreset() {
