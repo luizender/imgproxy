@@ -21,6 +21,13 @@ var watermarkPipeline = pipeline{
 }
 
 func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, imgWidth, imgHeight int) error {
+	if len(opts.ImageURL) > 0 {
+		var err error
+		if wmData, err = imagedata.Download(opts.ImageURL, "watermark_url", nil, nil); err != nil {
+			return err
+		}
+	}
+
 	if err := wm.Load(wmData, 1, 1.0, 1); err != nil {
 		return err
 	}
@@ -71,13 +78,6 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 
 	width := img.Width()
 	height := img.Height()
-
-	if len(opts.ImageURL) > 0 {
-		var err error
-		if wmData, err = imagedata.Download(opts.ImageURL, "watermark_url", nil, nil); err != nil {
-			return err
-		}
-	}
 
 	if err := prepareWatermark(wm, wmData, opts, width, height/framesCount); err != nil {
 		return err
