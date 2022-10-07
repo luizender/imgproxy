@@ -23,6 +23,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/imagetype"
 	"github.com/imgproxy/imgproxy/v3/metrics/datadog"
 	"github.com/imgproxy/imgproxy/v3/metrics/newrelic"
+	"github.com/imgproxy/imgproxy/v3/metrics/otel"
 	"github.com/imgproxy/imgproxy/v3/metrics/prometheus"
 )
 
@@ -104,6 +105,25 @@ func Init() error {
 	newrelic.AddGaugeFunc("vips.memory", GetMem)
 	newrelic.AddGaugeFunc("vips.max_memory", GetMemHighwater)
 	newrelic.AddGaugeFunc("vips.allocs", GetAllocs)
+
+	otel.AddGaugeFunc(
+		"vips_memory_bytes",
+		"A gauge of the vips tracked memory usage in bytes.",
+		"By",
+		GetMem,
+	)
+	otel.AddGaugeFunc(
+		"vips_max_memory_bytes",
+		"A gauge of the max vips tracked memory usage in bytes.",
+		"By",
+		GetMemHighwater,
+	)
+	otel.AddGaugeFunc(
+		"vips_allocs",
+		"A gauge of the number of active vips allocations.",
+		"By",
+		GetAllocs,
+	)
 
 	return nil
 }
@@ -363,28 +383,6 @@ func (img *Image) HasAlpha() bool {
 	return C.vips_image_hasalpha(img.VipsImage) > 0
 }
 
-func (img *Image) Premultiply() error {
-	var tmp *C.VipsImage
-
-	if C.vips_premultiply_go(img.VipsImage, &tmp) != 0 {
-		return Error()
-	}
-
-	C.swap_and_clear(&img.VipsImage, tmp)
-	return nil
-}
-
-func (img *Image) Unpremultiply() error {
-	var tmp *C.VipsImage
-
-	if C.vips_unpremultiply_go(img.VipsImage, &tmp) != 0 {
-		return Error()
-	}
-
-	C.swap_and_clear(&img.VipsImage, tmp)
-	return nil
-}
-
 func (img *Image) GetInt(name string) (int, error) {
 	var i C.int
 
@@ -499,18 +497,6 @@ func (img *Image) Resize(wscale, hscale float64) error {
 	return nil
 }
 
-func (img *Image) Pixelate(pixels int) error {
-	var tmp *C.VipsImage
-
-	if C.vips_pixelate(img.VipsImage, &tmp, C.int(pixels)) != 0 {
-		return Error()
-	}
-
-	C.swap_and_clear(&img.VipsImage, tmp)
-
-	return nil
-}
-
 func (img *Image) Orientation() C.int {
 	return C.vips_get_orientation(img.VipsImage)
 }
@@ -587,17 +573,6 @@ func (img *Image) Trim(threshold float64, smart bool, color Color, equalHor bool
 	return nil
 }
 
-func (img *Image) EnsureAlpha() error {
-	var tmp *C.VipsImage
-
-	if C.vips_ensure_alpha(img.VipsImage, &tmp) != 0 {
-		return Error()
-	}
-
-	C.swap_and_clear(&img.VipsImage, tmp)
-	return nil
-}
-
 func (img *Image) Flatten(bg Color) error {
 	var tmp *C.VipsImage
 
@@ -609,25 +584,15 @@ func (img *Image) Flatten(bg Color) error {
 	return nil
 }
 
-func (img *Image) Blur(sigma float32) error {
+func (img *Image) ApplyFilters(blurSigma, sharpSigma float32, pixelatePixels int) error {
 	var tmp *C.VipsImage
 
-	if C.vips_gaussblur_go(img.VipsImage, &tmp, C.double(sigma)) != 0 {
+	if C.vips_apply_filters(img.VipsImage, &tmp, C.double(blurSigma), C.double(sharpSigma), C.int(pixelatePixels)) != 0 {
 		return Error()
 	}
 
 	C.swap_and_clear(&img.VipsImage, tmp)
-	return nil
-}
 
-func (img *Image) Sharpen(sigma float32) error {
-	var tmp *C.VipsImage
-
-	if C.vips_sharpen_go(img.VipsImage, &tmp, C.double(sigma)) != 0 {
-		return Error()
-	}
-
-	C.swap_and_clear(&img.VipsImage, tmp)
 	return nil
 }
 

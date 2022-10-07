@@ -1,4 +1,4 @@
-ARG BASE_IMAGE_VERSION="v3.3.0"
+ARG BASE_IMAGE_VERSION="v3.3.2"
 
 FROM darthsim/imgproxy-base:${BASE_IMAGE_VERSION}
 
@@ -23,6 +23,7 @@ RUN apt-get update \
     liblzma5 \
     libzstd1 \
     libpcre3 \
+    media-types \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=0 /usr/local/bin/imgproxy /usr/local/bin/

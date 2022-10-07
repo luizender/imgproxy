@@ -141,6 +141,16 @@ var (
 	PrometheusBind      string
 	PrometheusNamespace string
 
+	OpenTelemetryEndpoint          string
+	OpenTelemetryProtocol          string
+	OpenTelemetryServiceName       string
+	OpenTelemetryEnableMetrics     bool
+	OpenTelemetryServerCert        string
+	OpenTelemetryClientCert        string
+	OpenTelemetryClientKey         string
+	OpenTelemetryPropagators       []string
+	OpenTelemetryConnectionTimeout int
+
 	BugsnagKey   string
 	BugsnagStage string
 
@@ -307,6 +317,16 @@ func Reset() {
 	PrometheusBind = ""
 	PrometheusNamespace = ""
 
+	OpenTelemetryEndpoint = ""
+	OpenTelemetryProtocol = "grpc"
+	OpenTelemetryServiceName = "imgproxy"
+	OpenTelemetryEnableMetrics = false
+	OpenTelemetryServerCert = ""
+	OpenTelemetryClientCert = ""
+	OpenTelemetryClientKey = ""
+	OpenTelemetryPropagators = make([]string, 0)
+	OpenTelemetryConnectionTimeout = 5
+
 	BugsnagKey = ""
 	BugsnagStage = "production"
 
@@ -402,18 +422,18 @@ func Configure() error {
 	configurators.Bool(&UseLinearColorspace, "IMGPROXY_USE_LINEAR_COLORSPACE")
 	configurators.Bool(&DisableShrinkOnLoad, "IMGPROXY_DISABLE_SHRINK_ON_LOAD")
 
-	if err := configurators.Hex(&Keys, "IMGPROXY_KEY"); err != nil {
+	if err := configurators.HexSlice(&Keys, "IMGPROXY_KEY"); err != nil {
 		return err
 	}
-	if err := configurators.Hex(&Salts, "IMGPROXY_SALT"); err != nil {
+	if err := configurators.HexSlice(&Salts, "IMGPROXY_SALT"); err != nil {
 		return err
 	}
 	configurators.Int(&SignatureSize, "IMGPROXY_SIGNATURE_SIZE")
 
-	if err := configurators.HexFile(&Keys, keyPath); err != nil {
+	if err := configurators.HexSliceFile(&Keys, keyPath); err != nil {
 		return err
 	}
-	if err := configurators.HexFile(&Salts, saltPath); err != nil {
+	if err := configurators.HexSliceFile(&Salts, saltPath); err != nil {
 		return err
 	}
 
@@ -484,6 +504,16 @@ func Configure() error {
 
 	configurators.String(&PrometheusBind, "IMGPROXY_PROMETHEUS_BIND")
 	configurators.String(&PrometheusNamespace, "IMGPROXY_PROMETHEUS_NAMESPACE")
+
+	configurators.String(&OpenTelemetryEndpoint, "IMGPROXY_OPEN_TELEMETRY_ENDPOINT")
+	configurators.String(&OpenTelemetryProtocol, "IMGPROXY_OPEN_TELEMETRY_PROTOCOL")
+	configurators.String(&OpenTelemetryServiceName, "IMGPROXY_OPEN_TELEMETRY_SERVICE_NAME")
+	configurators.Bool(&OpenTelemetryEnableMetrics, "IMGPROXY_OPEN_TELEMETRY_ENABLE_METRICS")
+	configurators.String(&OpenTelemetryServerCert, "IMGPROXY_OPEN_TELEMETRY_SERVER_CERT")
+	configurators.String(&OpenTelemetryClientCert, "IMGPROXY_OPEN_TELEMETRY_CLIENT_CERT")
+	configurators.String(&OpenTelemetryClientKey, "IMGPROXY_OPEN_TELEMETRY_CLIENT_KEY")
+	configurators.StringSlice(&OpenTelemetryPropagators, "IMGPROXY_OPEN_TELEMETRY_PROPAGATORS")
+	configurators.Int(&OpenTelemetryConnectionTimeout, "IMGPROXY_OPEN_TELEMETRY_CONNECTION_TIMEOUT")
 
 	configurators.String(&BugsnagKey, "IMGPROXY_BUGSNAG_KEY")
 	configurators.String(&BugsnagStage, "IMGPROXY_BUGSNAG_STAGE")
@@ -622,6 +652,10 @@ func Configure() error {
 
 	if len(PrometheusBind) > 0 && PrometheusBind == Bind {
 		return fmt.Errorf("Can't use the same binding for the main server and Prometheus")
+	}
+
+	if OpenTelemetryConnectionTimeout < 1 {
+		return fmt.Errorf("OpenTelemetry connection timeout should be greater than zero")
 	}
 
 	if FreeMemoryInterval <= 0 {

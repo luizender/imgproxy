@@ -529,15 +529,6 @@ eth:%enforce_thumbnail
 
 When set to `1`, `t` or `true` and the source image has an embedded thumbnail, imgproxy will always use the embedded thumbnail instead of the main image. Currently, only thumbnails embedded in `heic` and `avif` are supported. This is normally controlled by the [IMGPROXY_ENFORCE_THUMBNAIL](configuration.md#miscellaneous) configuration but this procesing option allows the configuration to be set for each request.
 
-### Return attachment
-
-```
-return_attachment:%return_attachment
-att:%return_attachment
-```
-
-When set to `1`, `t` or `true`, imgproxy will return `attachment` in the `Content-Disposition` header, and the browser will open a 'Save as' dialog. This is normally controlled by the [IMGPROXY_RETURN_ATTACHMENT](configuration.md#miscellaneous) configuration but this procesing option allows the configuration to be set for each request.
-
 ### Quality
 
 ```
@@ -671,6 +662,21 @@ When set, imgproxy will skip the processing of the listed formats. Also availabl
 
 Default: empty
 
+### Raw
+
+```
+raw:%raw
+```
+
+When set to `1`, `t` or `true`, imgproxy will respond with a raw unprocessed, and unchecked source image. There are some differences between `raw` and `skip_processing` options:
+
+* While the `skip_processing` option has some conditions to skip the processing, the `raw` option allows to skip processing no matter what
+* With the `raw` option set, imgproxy doesn't check the source image's type, resolution, and file size. Basically, the `raw` option allows streaming of any file type
+* With the `raw` option set, imgproxy won't download the whole image to the memory. Instead, it will stream the source image directly to the response lowering memory usage
+* The requests with the `raw` option set are not limited by the `IMGPROXY_CONCURRENCY` config
+
+Default: `false`
+
 ### Cache buster
 
 ```
@@ -706,6 +712,15 @@ Defines a filename for the `Content-Disposition` header. When not specified, img
 
 Default: empty
 
+### Return attachment
+
+```
+return_attachment:%return_attachment
+att:%return_attachment
+```
+
+When set to `1`, `t` or `true`, imgproxy will return `attachment` in the `Content-Disposition` header, and the browser will open a 'Save as' dialog. This is normally controlled by the [IMGPROXY_RETURN_ATTACHMENT](configuration.md#miscellaneous) configuration but this procesing option allows the configuration to be set for each request.
+
 ### Preset
 
 ```
@@ -720,9 +735,6 @@ Read more about presets in the [Presets](presets.md) guide.
 Default: empty
 
 ## Source URL
-
-There are two ways to specify the source url:
-
 ### Plain
 
 The source URL can be provided as is, prepended by the `/plain/` segment:
@@ -751,6 +763,20 @@ When using an encoded source URL, you can specify the [extension](#extension) af
 
 ```
 /aHR0cDovL2V4YW1w/bGUuY29tL2ltYWdl/cy9jdXJpb3NpdHku/anBn.png
+```
+
+#### Encrypted with AES-CBC
+
+The source URL can be encrypted with the AES-CBC algorithm, prepended by the `/enc/` segment. The encrypted URL can be split with `/` as desired:
+
+```
+/enc/jwV3wUD9r4VBIzgv/ang3Hbh0vPpcm5cc/VO5rHxzonpvZjppG/2VhDnX2aariBYegH/jlhw_-dqjXDMm4af/ZDU6y5sBog
+```
+
+When using an encrypted source URL, you can specify the [extension](#extension) after `.`:
+
+```
+/enc/jwV3wUD9r4VBIzgv/ang3Hbh0vPpcm5cc/VO5rHxzonpvZjppG/2VhDnX2aariBYegH/jlhw_-dqjXDMm4af/ZDU6y5sBog.png
 ```
 
 ## Extension

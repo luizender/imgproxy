@@ -30,6 +30,9 @@
   --table-row-even-background: var(--base-background-color);
 
   --selection-color: rgba(255, 255, 255, 0.3);
+
+  --sidebar-width: 20rem;
+  --sidebar-nav-link-before-content-l3: "";
 }
 
 .app-name-link img {
@@ -60,6 +63,10 @@ body::before {
   }
 }
 
+.markdown-section p {
+  overflow-wrap: break-word;
+}
+
 .loading {
   margin: 150px auto 0;
   position: relative;
@@ -88,6 +95,11 @@ body::before {
     transform: rotate(360deg);
   }
 }
+
+.sidebar-nav li {
+  font-weight: bold;
+}
+
 .sidebar-nav li>a:only-child {
   padding: var(--sidebar-nav-pagelink-padding, var(--sidebar-nav-link-padding));
 }

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [3.8.0] - 2022-10-06
+### Add
+- Add [raw](https://docs.imgproxy.net/latest/generating_the_url?id=raw) processing option.
+- Add [OpenTelemetry](https://docs.imgproxy.net/latest/open_telemetry) support.
+- (pro) Add encrypted source URL support.
+
+### Changed
+- Try to fix some invalid source URL cases that happen because of URL normalization.
+
+## [3.7.2] - 2022-08-22
+### Changed
+- (docker) Faster images quantization.
+- (docker) Faster loading of GIF.
+
+## [3.7.1] - 2022-08-01
+### Fix
+- Fix memory bloat in some cases.
+- Fix `format_quality` usage in presets.
+
 ## [3.7.0] - 2022-07-27
 ### Add
 - Add support of 16-bit BMP.
