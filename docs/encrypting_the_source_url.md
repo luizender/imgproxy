@@ -1,4 +1,4 @@
-# Encrypting the source URL![pro](/assets/pro.svg)
+# Encrypting the source URL![pro](./assets/pro.svg)
 
 If you don't want to reveal your source URLs, you can encrypt them with the AES-CBC algorithm.
 
@@ -63,7 +63,7 @@ It's 39-byte long, so we should align it to 16 bytes using the PKCS #7 method:
 http://example.com/images/curiosity.jpg\09\09\09\09\09\09\09\09\09
 ```
 
-**📝Note:** From this point on, we'll show unprintable characters in `\NN` format where `NN` is a hex representation of the byte.
+**📝 Note:** From this point on, we'll show unprintable characters in `\NN` format where `NN` is a hex representation of the byte.
 
 Next, we need an initialization vector (IV). Let's assume we generated the following IV:
 
@@ -95,4 +95,4 @@ Now you can put this encrypted URL in the imgproxy URL path, prepending it with 
 /unsafe/rs:fit:300:300/enc/p5VjorNdhs7mRRw8gA9TWoRlGci3l1kuzqN43UQlRaRIQ0qtBKW3qFABIsx-ZRz_cVc8iVTYbhsNsxNBL1BHaQ
 ```
 
-**📝Note:** The imgproxy URL in this example is not signed but signing URLs is especially important when using encrypted source URLs to prevent a padding oracle attack.
+**📝 Note:** The imgproxy URL in this example is not signed but signing URLs is especially important when using encrypted source URLs to prevent a padding oracle attack.

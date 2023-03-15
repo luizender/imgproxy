@@ -14,9 +14,9 @@ At the moment, imgproxy supports only the most popular image formats:
 | HEIC   | `heic`    | Yes    | No     |
 | BMP    | `bmp`     | Yes    | Yes    |
 | TIFF   | `tiff`    | Yes    | Yes    |
-| PDF ![pro](/assets/pro.svg) | `pdf` | Yes | No |
-| MP4 (h264) ![pro](/assets/pro.svg) | `mp4` | [See notes](#video-thumbnails) | Yes |
-| Other video formats ![pro](/assets/pro.svg) | | [See notes](#video-thumbnails) | No |
+| PDF ![pro](./assets/pro.svg) | `pdf` | Yes | No |
+| MP4 (h264) ![pro](./assets/pro.svg) | `mp4` | [See notes](#video-thumbnails) | Yes |
+| Other video formats ![pro](./assets/pro.svg) | | [See notes](#video-thumbnails) | No |
 
 ## SVG support
 
@@ -34,15 +34,15 @@ Since the processing of animated images is a pretty heavy process, only one fram
 
 * `IMGPROXY_MAX_ANIMATION_FRAMES`: the maximum of animated image frames to be processed. Default: `1`.
 
-**📝Note:** imgproxy summarizes all frames resolutions while the checking source image resolution.
+**📝 Note:** imgproxy summarizes all frames resolutions while the checking source image resolution.
 
-## Converting animated images to MP4![pro](/assets/pro.svg) :id=converting-animated-images-to-mp4
+## Converting animated images to MP4![pro](./assets/pro.svg) :id=converting-animated-images-to-mp4
 
 Animated image results can be converted to MP4 by specifying the `mp4` extension.
 
 Since MP4 requires use of a `<video>` tag instead of `<img>`, automatic conversion to MP4 is not provided.
 
-## Video thumbnails![pro](/assets/pro.svg) :id=video-thumbnails
+## Video thumbnails![pro](./assets/pro.svg) :id=video-thumbnails
 
 If you provide a video as a source, imgproxy takes a specific frame to create a thumbnail. To do this, imgproxy downloads only the amount of data required to reach the needed frame.
 

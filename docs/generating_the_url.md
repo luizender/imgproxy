@@ -62,7 +62,7 @@ Defines how imgproxy will resize the source image. Supported resizing types are:
 
 Default: `fit`
 
-### Resizing algorithm![pro](/assets/pro.svg) :id=resizing-algorithm
+### Resizing algorithm![pro](./assets/pro.svg) :id=resizing-algorithm
 
 ```
 resizing_algorithm:%algorithm
@@ -104,7 +104,7 @@ mw:%width
 
 Defines the minimum width of the resulting image.
 
-**⚠️Warning:** When both `width` and `min-width` are set, the final image will be cropped according to `width`, so use this combination with care.
+**⚠️ Warning:** When both `width` and `min-width` are set, the final image will be cropped according to `width`, so use this combination with care.
 
 Default: `0`
 
@@ -117,7 +117,7 @@ mh:%height
 
 Defines the minimum height of the resulting image.
 
-**⚠️Warning:** When both `height` and `min-height` are set, the final image will be cropped according to `height`, so use this combination with care.
+**⚠️ Warning:** When both `height` and `min-height` are set, the final image will be cropped according to `height`, so use this combination with care.
 
 Default: `0`
 
@@ -127,15 +127,15 @@ Default: `0`
 zoom:%zoom_x_y
 z:%zoom_x_y
 
-zoom:%zoom_x %zoom_y
-z:%zoom_x %zoom_y
+zoom:%zoom_x:%zoom_y
+z:%zoom_x:%zoom_y
 ```
 
 When set, imgproxy will multiply the image dimensions according to these factors. The values must be greater than 0.
 
 Can be combined with `width` and `height` options. In this case, imgproxy calculates scale factors for the provided size and then multiplies it with the provided zoom factors.
 
-**📝Note:** Unlike [dpr](#dpr), `zoom` doesn't set the `Content-DPR` header in the response.
+**📝 Note:** Unlike [dpr](#dpr), `zoom` doesn't set the `Content-DPR` header in the response.
 
 Default: `1`
 
@@ -147,7 +147,7 @@ dpr:%dpr
 
 When set, imgproxy will multiply the image dimensions according to this factor for HiDPI (Retina) devices. The value must be greater than 0.
 
-**📝Note:** `dpr` also sets the `Content-DPR` header in the response so the browser can correctly render the image.
+**📝 Note:** `dpr` also sets the `Content-DPR` header in the response so the browser can correctly render the image.
 
 Default: `1`
 
@@ -170,6 +170,19 @@ ex:%extend:%gravity
 ```
 
 - When `extend` is set to `1`, `t` or `true`, imgproxy will extend the image if it is smaller than the given size.
+- `gravity` _(optional)_ accepts the same values as the [gravity](#gravity) option, except `sm`. When `gravity` is not set, imgproxy will use `ce` gravity without offsets.
+
+Default: `false:ce:0:0`
+
+### Extend aspect ratio
+
+```
+extend_aspect_ratio:%extend:%gravity
+extend_ar:%extend:%gravity
+exar:%extend:%gravity
+```
+
+- When `extend` is set to `1`, `t` or `true`, imgproxy will extend the image to the requested aspect ratio.
 - `gravity` _(optional)_ accepts the same values as the [gravity](#gravity) option, except `sm`. When `gravity` is not set, imgproxy will use `ce` gravity without offsets.
 
 Default: `false:ce:0:0`
@@ -200,7 +213,7 @@ Default: `ce:0:0`
 **Special gravities**:
 
 - `gravity:sm`: smart gravity. `libvips` detects the most "interesting" section of the image and considers it as the center of the resulting image. Offsets are not applicable here.
-- `gravity:obj:%class_name1:%class_name2:...:%class_nameN`: ![pro](/assets/pro.svg) object-oriented gravity. imgproxy [detects objects](object_detection.md) of provided classes on the image and calculates the resulting image center using their positions. If class names are omited, imgproxy will use all the detected objects.
+- `gravity:obj:%class_name1:%class_name2:...:%class_nameN`: ![pro](./assets/pro.svg) object-oriented gravity. imgproxy [detects objects](object_detection.md) of provided classes on the image and calculates the resulting image center using their positions. If class names are omited, imgproxy will use all the detected objects.
 - `gravity:fp:%x:%y`: the gravity focus point . `x` and `y` are floating point numbers between 0 and 1 that define the coordinates of the center of the resulting image. Treat 0 and 1 as right/left for `x` and top/bottom for `y`.
 
 ### Crop
@@ -232,13 +245,13 @@ Removes surrounding background.
 - `equal_hor` - _(optional)_ set to `1`, `t` or `true`, imgproxy will cut only equal parts from left and right sides. That means that if 10px of background can be cut off from the left and 5px from the right, then 5px will be cut off from both sides. For example, this can be useful if objects on your images are centered but have non-symmetrical shadow.
 - `equal_ver` - _(optional)_ acts like `equal_hor` but for top/bottom sides.
 
-**⚠️Warning:** Trimming requires an image to be fully loaded into memory. This disables scale-on-load and significantly increases memory usage and processing time. Use it carefully with large images.
+**⚠️ Warning:** Trimming requires an image to be fully loaded into memory. This disables scale-on-load and significantly increases memory usage and processing time. Use it carefully with large images.
 
-**📝Note:** If you know background color of your images then setting it explicitly via `color` will also save some resources because imgproxy won't need to automatically detect it.
+**📝 Note:** If you know background color of your images then setting it explicitly via `color` will also save some resources because imgproxy won't need to automatically detect it.
 
-**📝Note:** Use a `color` value of `FF00FF` for trimming transparent backgrounds as imgproxy uses magenta as a transparency key.
+**📝 Note:** Use a `color` value of `FF00FF` for trimming transparent backgrounds as imgproxy uses magenta as a transparency key.
 
-**📝Note:** The trimming of animated images is not supported.
+**📝 Note:** The trimming of animated images is not supported.
 
 ### Padding
 
@@ -254,11 +267,11 @@ Defines padding size using CSS-style syntax. All arguments are optional but at l
 - `bottom` - bottom padding
 - `left` - left padding
 
-**📝Note:** Padding is applied after all image transformations (except watermarking) and enlarges the generated image. This means that if your resize dimensions were 100x200px and you applied the `padding:10` option, then you will end up with an image with dimensions of 120x220px.
+**📝 Note:** Padding is applied after all image transformations (except watermarking) and enlarges the generated image. This means that if your resize dimensions were 100x200px and you applied the `padding:10` option, then you will end up with an image with dimensions of 120x220px.
 
-**📝Note:** Padding follows the [dpr](#dpr) option so it will also be scaled if you've set it.
+**📝 Note:** Padding follows the [dpr](#dpr) option so it will also be scaled if you've set it.
 
-### Auto Rotate
+### Auto rotate
 
 ```
 auto_rotate:%auto_rotate
@@ -276,7 +289,7 @@ rot:%angle
 
 Rotates the image on the specified angle. The orientation from the image metadata is applied before the rotation unless autorotation is disabled.
 
-**📝Note:** Only 0, 90, 180, 270, etc., degree angles are supported.
+**📝 Note:** Only 0, 90, 180, 270, etc., degree angles are supported.
 
 Default: 0
 
@@ -296,7 +309,7 @@ With no arguments provided, disables any background manipulations.
 
 Default: disabled
 
-### Background alpha![pro](/assets/pro.svg) :id=background-alpha
+### Background alpha![pro](./assets/pro.svg) :id=background-alpha
 
 ```
 background_alpha:%alpha
@@ -307,7 +320,7 @@ Adds an alpha channel to `background`. The value of `alpha` is a positive floati
 
 Default: 1
 
-### Adjust![pro](/assets/pro.svg) :id=adjust
+### Adjust![pro](./assets/pro.svg) :id=adjust
 
 ```
 adjust:%brightness:%contrast:%saturation
@@ -316,7 +329,7 @@ a:%brightness:%contrast:%saturation
 
 This is a meta-option that defines the [brightness](#brightness), [contrast](#contrast), and [saturation](#saturation). All arguments are optional and can be omitted to use their default values.
 
-### Brightness![pro](/assets/pro.svg) :id=brightness
+### Brightness![pro](./assets/pro.svg) :id=brightness
 
 ```
 brightness:%brightness
@@ -327,7 +340,7 @@ When set, imgproxy will adjust brightness of the resulting image. `brightness` i
 
 Default: 0
 
-### Contrast![pro](/assets/pro.svg) :id=contrast
+### Contrast![pro](./assets/pro.svg) :id=contrast
 
 ```
 contrast:%contrast
@@ -338,7 +351,7 @@ When set, imgproxy will adjust the contrast of the resulting image. `contrast` i
 
 Default: 1
 
-### Saturation![pro](/assets/pro.svg) :id=saturation
+### Saturation![pro](./assets/pro.svg) :id=saturation
 
 ```
 saturation:%saturation
@@ -384,7 +397,7 @@ When set, imgproxy will apply the pixelate filter to the resulting image. The va
 
 Default: disabled
 
-### Unsharpening![pro](/assets/pro.svg) :id=unsharpening
+### Unsharpening![pro](./assets/pro.svg) :id=unsharpening
 
 ```
 unsharpening:%mode:%weight:%dividor
@@ -393,7 +406,7 @@ ush:%mode:%weight:%dividor
 
 Allows redefining unsharpening options. All arguments have the same meaning as [Unsharpening](configuration.md#unsharpening) configs. All arguments are optional and can be omitted.
 
-### Blur detections![pro](/assets/pro.svg) :id=blur-detections
+### Blur detections![pro](./assets/pro.svg) :id=blur-detections
 
 ```
 blur_detections:%sigma:%class_name1:%class_name2:...:%class_nameN
@@ -404,7 +417,7 @@ imgproxy [detects objects](object_detection.md) of the provided classes and blur
 
 The value of `sigma` defines the size of the mask imgproxy will use.
 
-### Draw detections![pro](/assets/pro.svg) :id=draw-detections
+### Draw detections![pro](./assets/pro.svg) :id=draw-detections
 
 ```
 draw_detections:%draw:%class_name1:%class_name2:...:%class_nameN
@@ -412,6 +425,24 @@ dd:%draw:%class_name1:%class_name2:...:%class_nameN
 ```
 
 When `draw` is set to `1`, `t` or `true`, imgproxy [detects objects](object_detection.md) of the provided classes and draws their bounding boxes. If class names are omitted, imgproxy draws the bounding boxes of all the detected objects.
+
+### Gradient![pro](./assets/pro.svg) :id=gradient
+
+```
+gradient:%opacity:%color:%direction:%start%stop
+gr:%opacity:%color:%direction:%start%stop
+```
+
+Places a gradient on the processed image. The placed gradient transitions from transparency to the specified color.
+
+- `opacity`: specifies gradient opacity. When set to `0`, gradient is not applied.
+- `color`: _(optional)_ a hex-coded value of the gradient color. Default: `000` (black).
+- `direction`: _(optional)_ specifies the direction of the gradient. Available values:
+  - `down`: _(default)_ the top side of the gradient is transparrent, the bottom side is opaque
+  - `up`: the bottom side of the gradient is transparrent, the top side is opaque
+  - `right`: the left side of the gradient is transparrent, the right side is opaque
+  - `left`: the right side of the gradient is transparrent, the left side is opaque
+- `start`, `stop`: floating point numbers that define relative positions of where the gradient starts and where it ends. Default values are `0.0` and `1.0` respectively.
 
 ### Watermark
 
@@ -439,25 +470,25 @@ Places a watermark on the processed image.
 
 Default: disabled
 
-### Watermark URL![pro](/assets/pro.svg) :id=watermark-url
+### Watermark URL![pro](./assets/pro.svg) :id=watermark-url
 
 ```
 watermark_url:%url
 wmu:%url
 ```
 
-When set, imgproxy will use the image from the specified URL as a watermark. `url` is the Base64-encoded URL of the custom watermark.
+When set, imgproxy will use the image from the specified URL as a watermark. `url` is the URL-safe Base64-encoded URL of the custom watermark.
 
 Default: blank
 
-### Watermark text![pro](/assets/pro.svg) :id=watermark-text
+### Watermark text![pro](./assets/pro.svg) :id=watermark-text
 
 ```
 watermark_text:%text
 wmt:%text
 ```
 
-When set, imgproxy will generate an image from the provided text and use it as a watermark. `text` is the Base64-encoded text of the custom watermark.
+When set, imgproxy will generate an image from the provided text and use it as a watermark. `text` is the URL-safe Base64-encoded text of the custom watermark.
 
 By default, the text color is black and the font is `sans 16`. You can use [Pango markup](https://docs.gtk.org/Pango/pango_markup.html) in the `text` value to change the style.
 
@@ -465,7 +496,7 @@ If you want to use a custom font, you need to put it in `/usr/share/fonts` insid
 
 Default: blank
 
-### Watermark Size![pro](/assets/pro.svg) :id=watermark-size
+### Watermark size![pro](./assets/pro.svg) :id=watermark-size
 
 ```
 watermark_size:%width:%height
@@ -478,22 +509,33 @@ When `%width` is set to `0`, imgproxy will calculate the width using the defined
 
 When `%height` is set to `0`, imgproxy will calculate the height using the defined width and watermark's aspect ratio.
 
-**📝Note:** This processing option takes effect only when the `scale` argument of the `watermark` option is set to zero.
+**📝 Note:** This processing option takes effect only when the `scale` argument of the `watermark` option is set to zero.
 
 Default: `0:0`
 
-### Style![pro](/assets/pro.svg) :id=style
+### Watermark shadow![pro](./assets/pro.svg) :id=watermark-shadow
+
+```
+watermark_shadow:%sigma
+wmsh:%sigma
+```
+
+When set, imgproxy will add a shadow to the watermark. The value of `sigma` defines the size of the mask imgproxy will use to blur the shadow.
+
+Default: disabled
+
+### Style![pro](./assets/pro.svg) :id=style
 
 ```
 style:%style
 st:%style
 ```
 
-When set, imgproxy will prepend a `<style>` node with the provided content to the `<svg>` node of a source SVG image. `%style` is url-safe Base64-encoded CSS-styles.
+When set, imgproxy will prepend a `<style>` node with the provided content to the `<svg>` node of a source SVG image. `%style` is URL-safe Base64-encoded CSS-styles.
 
 Default: blank
 
-### Strip Metadata
+### Strip metadata
 
 ```
 strip_metadata:%strip_metadata
@@ -502,7 +544,7 @@ sm:%strip_metadata
 
 When set to `1`, `t` or `true`, imgproxy will strip the metadata (EXIF, IPTC, etc.) on JPEG and WebP output images. This is normally controlled by the [IMGPROXY_STRIP_METADATA](configuration.md#miscellaneous) configuration but this procesing option allows the configuration to be set for each request.
 
-### Keep Copyright
+### Keep copyright
 
 ```
 keep_copyright:%keep_copyright
@@ -511,7 +553,7 @@ kcr:%keep_copyright
 
 When set to `1`, `t` or `true`, imgproxy will not remove copyright info while stripping metadata. This is normally controlled by the [IMGPROXY_KEEP_COPYRIGHT](configuration.md#miscellaneous) configuration but this procesing option allows the configuration to be set for each request.
 
-### Strip Color Profile
+### Strip color profile
 
 ```
 strip_color_profile:%strip_color_profile
@@ -549,7 +591,7 @@ fq:%format1:%quality1:%format2:%quality2:...:%formatN:%qualityN
 
 Adds or redefines `IMGPROXY_FORMAT_QUALITY` values.
 
-### Autoquality![pro](/assets/pro.svg) :id=autoquality
+### Autoquality![pro](./assets/pro.svg) :id=autoquality
 
 ```
 autoquality:%method:%target:%min_quality:%max_quality:%allowed_error
@@ -558,9 +600,9 @@ aq:%method:%target:%min_quality:%max_quality:%allowed_error
 
 Redefines autoquality settings. All arguments have the same meaning as [Autoquality](configuration.md#autoquality) configs. All arguments are optional and can be omitted.
 
-**⚠️Warning:** Autoquality requires the image to be saved several times. Use it only when you prefer the resulting size and quality over the speed.
+**⚠️ Warning:** Autoquality requires the image to be saved several times. Use it only when you prefer the resulting size and quality over the speed.
 
-### Max Bytes
+### Max bytes
 
 ```
 max_bytes:%bytes
@@ -569,13 +611,13 @@ mb:%bytes
 
 When set, imgproxy automatically degrades the quality of the image until the image size is under the specified amount of bytes.
 
-**📝Note:** Applicable only to `jpg`, `webp`, `heic`, and `tiff`.
+**📝 Note:** Applicable only to `jpg`, `webp`, `heic`, and `tiff`.
 
-**⚠️Warning:** When `max_bytes` is set, imgproxy saves image multiple times to achieve the specified image size.
+**⚠️ Warning:** When `max_bytes` is set, imgproxy saves image multiple times to achieve the specified image size.
 
 Default: 0
 
-### JPEG options![pro](/assets/pro.svg) :id=jpeg-options
+### JPEG options![pro](./assets/pro.svg) :id=jpeg-options
 
 ```
 jpeg_options:%progressive:%no_subsample:%trellis_quant:%overshoot_deringing:%optimize_scans:%quant_table
@@ -584,7 +626,7 @@ jpgo:%progressive:%no_subsample:%trellis_quant:%overshoot_deringing:%optimize_sc
 
 Allows redefining JPEG saving options. All arguments have the same meaning as the [Advanced JPEG compression](configuration.md#advanced-jpeg-compression) configs. All arguments are optional and can be omitted.
 
-### PNG options![pro](/assets/pro.svg) :id=png-options
+### PNG options![pro](./assets/pro.svg) :id=png-options
 
 ```
 png_options:%interlaced:%quantize:%quantization_colors
@@ -593,7 +635,7 @@ pngo:%interlaced:%quantize:%quantization_colors
 
 Allows redefining PNG saving options. All arguments have the same meaning as with the [Advanced PNG compression](configuration.md#advanced-png-compression) configs. All arguments are optional and can be omitted.
 
-<!-- ### GIF options![pro](/assets/pro.svg) :id=gif-options
+<!-- ### GIF options![pro](./assets/pro.svg) :id=gif-options
 
 ```
 gif_options:%optimize_frames:%optimize_transparency
@@ -601,6 +643,15 @@ gifo:%optimize_frames:%optimize_transparency
 ```
 
 Allows redefining GIF saving options. All arguments have the same meaning as with the [Advanced GIF compression](configuration.md#advanced-gif-compression) configs. All arguments are optional and can be omitted. -->
+
+### WebP options![pro](./assets/pro.svg) :id=webp-options
+
+```
+webp_options:%compression
+webpo:%compression
+```
+
+Allows redefining WebP saving options. All arguments have the same meaning as with the [Advanced WebP compression](configuration.md#advanced-webp-compression) configs. All arguments are optional and can be omitted.
 
 ### Format
 
@@ -614,7 +665,7 @@ Specifies the resulting image format. Alias for the [extension](#extension) part
 
 Default: `jpg`
 
-### Page![pro](/assets/pro.svg) :id=page
+### Page![pro](./assets/pro.svg) :id=page
 
 ```
 page:%page
@@ -625,7 +676,18 @@ When a source image supports pagination (PDF, TIFF) or animation (GIF, WebP), th
 
 Default: 0
 
-### Video thumbnail second![pro](/assets/pro.svg) :id=video-thumbnail-second
+### Disable animation![pro](./assets/pro.svg) :id=disable-animation
+
+```
+disable_animation:%disable
+da:%disable
+```
+
+When set to `1`, `t` or `true`, imgproxy will use a single frame of animated images. Use the [page](#page) option to specify which frame imgproxy should use.
+
+Default: `false`
+
+### Video thumbnail second![pro](./assets/pro.svg) :id=video-thumbnail-second
 
 ```
 video_thumbnail_second:%second
@@ -634,7 +696,7 @@ vts:%second
 
 Allows redefining `IMGPROXY_VIDEO_THUMBNAIL_SECOND` config.
 
-### Fallback image URL![pro](/assets/pro.svg) :id=fallback-image-url
+### Fallback image URL![pro](./assets/pro.svg) :id=fallback-image-url
 
 You can use a custom fallback image by specifying its URL with the `fallback_image_url` processing option:
 
@@ -643,7 +705,7 @@ fallback_image_url:%url
 fiu:%url
 ```
 
-The value of `url` is the Base64-encoded URL of the custom fallback image.
+The value of `url` is the URL-safe Base64-encoded URL of the custom fallback image.
 
 Default: blank
 
@@ -656,9 +718,9 @@ skp:%extension1:%extension2:...:%extensionN
 
 When set, imgproxy will skip the processing of the listed formats. Also available as the [IMGPROXY_SKIP_PROCESSING_FORMATS](configuration.md#skip-processing) configuration.
 
-**📝Note:** Processing can only be skipped when the requested format is the same as the source format.
+**📝 Note:** Processing can only be skipped when the requested format is the same as the source format.
 
-**📝Note:** Video thumbnail processing can't be skipped.
+**📝 Note:** Video thumbnail processing can't be skipped.
 
 Default: empty
 
@@ -670,10 +732,10 @@ raw:%raw
 
 When set to `1`, `t` or `true`, imgproxy will respond with a raw unprocessed, and unchecked source image. There are some differences between `raw` and `skip_processing` options:
 
-* While the `skip_processing` option has some conditions to skip the processing, the `raw` option allows to skip processing no matter what
-* With the `raw` option set, imgproxy doesn't check the source image's type, resolution, and file size. Basically, the `raw` option allows streaming of any file type
-* With the `raw` option set, imgproxy won't download the whole image to the memory. Instead, it will stream the source image directly to the response lowering memory usage
-* The requests with the `raw` option set are not limited by the `IMGPROXY_CONCURRENCY` config
+- While the `skip_processing` option has some conditions to skip the processing, the `raw` option allows to skip processing no matter what
+- With the `raw` option set, imgproxy doesn't check the source image's type, resolution, and file size. Basically, the `raw` option allows streaming of any file type
+- With the `raw` option set, imgproxy won't download the whole image to the memory. Instead, it will stream the source image directly to the response lowering memory usage
+- The requests with the `raw` option set are not limited by the `IMGPROXY_CONCURRENCY` config
 
 Default: `false`
 
@@ -734,7 +796,52 @@ Read more about presets in the [Presets](presets.md) guide.
 
 Default: empty
 
+### Max src resolution
+
+```
+max_src_resolution:%resolution
+msr:%resolution
+```
+
+Allows redefining `IMGPROXY_MAX_SRC_RESOLUTION` config.
+
+**⚠️ Warning:** Since this option allows redefining a security restriction, its usage is not allowed unless the `IMGPROXY_ALLOW_SECURITY_OPTIONS` config is set to `true`.
+
+### Max src file size
+
+```
+max_src_file_size:%size
+msfs:%size
+```
+
+Allows redefining `IMGPROXY_MAX_SRC_FILE_SIZE` config.
+
+**⚠️ Warning:** Since this option allows redefining a security restriction, its usage is not allowed unless the `IMGPROXY_ALLOW_SECURITY_OPTIONS` config is set to `true`.
+
+### Max animation frames
+
+```
+max_animation_frames:%size
+maf:%size
+```
+
+Allows redefining `IMGPROXY_MAX_ANIMATION_FRAMES` config.
+
+**⚠️ Warning:** Since this option allows redefining a security restriction, its usage is not allowed unless the `IMGPROXY_ALLOW_SECURITY_OPTIONS` config is set to `true`.
+
+### Max animation frame resolution
+
+```
+max_animation_frame_resolution:%size
+mafr:%size
+```
+
+Allows redefining `IMGPROXY_MAX_ANIMATION_FRAME_RESOLUTION` config.
+
+**⚠️ Warning:** Since this option allows redefining a security restriction, its usage is not allowed unless the `IMGPROXY_ALLOW_SECURITY_OPTIONS` config is set to `true`.
+
 ## Source URL
+
 ### Plain
 
 The source URL can be provided as is, prepended by the `/plain/` segment:
@@ -743,7 +850,7 @@ The source URL can be provided as is, prepended by the `/plain/` segment:
 /plain/http://example.com/images/curiosity.jpg
 ```
 
-**📝Note:** If the source URL contains a query string or `@`, you'll need to escape it.
+**📝 Note:** If the source URL contains a query string or `@`, you'll need to escape it.
 
 When using a plain source URL, you can specify the [extension](#extension) after `@`:
 
@@ -765,7 +872,7 @@ When using an encoded source URL, you can specify the [extension](#extension) af
 /aHR0cDovL2V4YW1w/bGUuY29tL2ltYWdl/cy9jdXJpb3NpdHku/anBn.png
 ```
 
-#### Encrypted with AES-CBC
+### Encrypted with AES-CBC
 
 The source URL can be encrypted with the AES-CBC algorithm, prepended by the `/enc/` segment. The encrypted URL can be split with `/` as desired:
 
@@ -783,7 +890,11 @@ When using an encrypted source URL, you can specify the [extension](#extension) 
 
 Extension specifies the format of the resulting image. Read more about image formats support [here](image_formats_support.md).
 
-The extension can be omitted. In this case, imgproxy will use the source image format as resulting one. If the source image format is not supported as the resulting image, imgproxy will use `jpg`. You also can [enable WebP support detection](configuration.md#webp-support-detection) to use it as the default resulting format when possible.
+The extension can be omitted. In this case, imgproxy will use the source image format as resulting one. If the source image format is not supported as the resulting image, imgproxy will use `jpg`. You also can [enable WebP support detection](configuration.md#avifwebp-support-detection) to use it as the default resulting format when possible.
+
+### Best format![pro](./assets/pro.svg)
+
+You can use the `best` value for the [format](generating_the_url.md#format) option or the [extension](generating_the_url.md#extension) to make imgproxy pick the best format for the resultant image. Check out the [Best format](best_format.md) guide to learn more.
 
 ## Example
 

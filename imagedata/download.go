@@ -4,14 +4,14 @@ import (
 	"compress/gzip"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
-	"net"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"time"
 
 	"github.com/imgproxy/imgproxy/v3/config"
 	"github.com/imgproxy/imgproxy/v3/ierrors"
+	"github.com/imgproxy/imgproxy/v3/security"
 
 	azureTransport "github.com/imgproxy/imgproxy/v3/transport/azure"
 	fsTransport "github.com/imgproxy/imgproxy/v3/transport/fs"
@@ -40,6 +40,11 @@ var (
 
 const msgSourceImageIsUnreachable = "Source image is unreachable"
 
+type DownloadOptions struct {
+	Header    http.Header
+	CookieJar *cookiejar.Jar
+}
+
 type ErrorNotModified struct {
 	Message string
 	Headers map[string]string
@@ -50,12 +55,16 @@ func (e *ErrorNotModified) Error() string {
 }
 
 func initDownloading() error {
-	transport := &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		MaxIdleConns:        config.Concurrency,
-		MaxIdleConnsPerHost: config.Concurrency,
-		DisableCompression:  true,
-		DialContext:         (&net.Dialer{KeepAlive: 600 * time.Second}).DialContext,
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DisableCompression = true
+
+	if config.ClientKeepAliveTimeout > 0 {
+		transport.MaxIdleConns = config.Concurrency
+		transport.MaxIdleConnsPerHost = config.Concurrency
+		transport.IdleConnTimeout = time.Duration(config.ClientKeepAliveTimeout) * time.Second
+	} else {
+		transport.MaxIdleConns = 0
+		transport.MaxIdleConnsPerHost = 0
 	}
 
 	if config.IgnoreSslVerification {
@@ -139,7 +148,7 @@ func BuildImageRequest(imageURL string, header http.Header, jar *cookiejar.Jar) 
 	if _, ok := enabledSchemes[req.URL.Scheme]; !ok {
 		return nil, ierrors.New(
 			404,
-			fmt.Sprintf("Unknown sheme: %s", req.URL.Scheme),
+			fmt.Sprintf("Unknown scheme: %s", req.URL.Scheme),
 			msgSourceImageIsUnreachable,
 		)
 	}
@@ -170,8 +179,8 @@ func SendRequest(req *http.Request) (*http.Response, error) {
 	return res, nil
 }
 
-func requestImage(imageURL string, header http.Header, jar *cookiejar.Jar) (*http.Response, error) {
-	req, err := BuildImageRequest(imageURL, header, jar)
+func requestImage(imageURL string, opts DownloadOptions) (*http.Response, error) {
+	req, err := BuildImageRequest(imageURL, opts.Header, opts.CookieJar)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +196,7 @@ func requestImage(imageURL string, header http.Header, jar *cookiejar.Jar) (*htt
 	}
 
 	if res.StatusCode != 200 {
-		body, _ := ioutil.ReadAll(res.Body)
+		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
 
 		status := 404
@@ -202,13 +211,13 @@ func requestImage(imageURL string, header http.Header, jar *cookiejar.Jar) (*htt
 	return res, nil
 }
 
-func download(imageURL string, header http.Header, jar *cookiejar.Jar) (*ImageData, error) {
+func download(imageURL string, opts DownloadOptions, secopts security.Options) (*ImageData, error) {
 	// We use this for testing
 	if len(redirectAllRequestsTo) > 0 {
 		imageURL = redirectAllRequestsTo
 	}
 
-	res, err := requestImage(imageURL, header, jar)
+	res, err := requestImage(imageURL, opts)
 	if res != nil {
 		defer res.Body.Close()
 	}
@@ -231,7 +240,7 @@ func download(imageURL string, header http.Header, jar *cookiejar.Jar) (*ImageDa
 		contentLength = 0
 	}
 
-	imgdata, err := readAndCheckImage(body, contentLength)
+	imgdata, err := readAndCheckImage(body, contentLength, secopts)
 	if err != nil {
 		return nil, ierrors.Wrap(err, 0)
 	}

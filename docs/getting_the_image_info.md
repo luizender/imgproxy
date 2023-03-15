@@ -1,4 +1,4 @@
-# Getting the image info![pro](/assets/pro.svg)
+# Getting the image info![pro](./assets/pro.svg)
 
 imgproxy can fetch and return a source image info without downloading the whole image.
 
@@ -26,7 +26,7 @@ The source URL can be provided as is, prepended by `/plain/` part:
 /plain/http://example.com/images/curiosity.jpg
 ```
 
-**📝Note:** If the source URL contains a query string or `@`, you'll need to escape it.
+**📝 Note:** If the source URL contains a query string or `@`, you'll need to escape it.
 
 #### Base64 encoded
 
@@ -54,9 +54,10 @@ imgproxy responses with a JSON body and returns the following info:
 * `size`: file size. Can be zero if the image source doesn't set `Content-Length` header properly
 * `exif`: Exif data
 * `iptc`: IPTC data
+* `xmp`: XMP data
 * `video_meta`: metadata from the video
 
-**📝Note:** There are lots of IPTC tags in the spec, but imgproxy supports only a few of them. If you need some tags to be supported, just contact us.
+**📝 Note:** There are lots of IPTC tags in the spec, but imgproxy supports only a few of them. If you need some tags to be supported, just contact us.
 
 #### Example (JPEG)
 
@@ -78,6 +79,25 @@ imgproxy responses with a JSON body and returns the following info:
     "Caption": "Spider-Man swings on the web",
     "Copyright Notice": "Daily Bugle",
     "Keywords": ["spider-man", "menance", "offender"]
+  },
+  "xmp": {
+    "aux": {
+      "ApproximateFocusDistance": "4294967295/1",
+      "ImageNumber": "16604",
+      "Lens": "16.0-35.0 mm f/4.0",
+      "LensID": "163",
+      "LensInfo": "160/10 350/10 40/10 40/10",
+      "SerialNumber": "12345678"
+    },
+    "dc": {
+      "creator": ["Peter B. Parker"],
+      "publisher": ["Daily Bugle"],
+      "subject": ["spider-man", "menance", "offender"],
+      "format": "image/jpeg"
+    },
+    "photoshop": {
+      "DateCreated": "2016-09-11T18:44:50.003"
+    }
   }
 }
 ```
