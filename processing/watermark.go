@@ -7,6 +7,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/imagedata"
 	"github.com/imgproxy/imgproxy/v3/imath"
 	"github.com/imgproxy/imgproxy/v3/options"
+	"github.com/imgproxy/imgproxy/v3/security"
 	"github.com/imgproxy/imgproxy/v3/vips"
 )
 
@@ -22,7 +23,7 @@ var watermarkPipeline = pipeline{
 func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, imgWidth, imgHeight, framesCount int) error {
 	if len(opts.ImageURL) > 0 {
 		var err error
-		if wmData, err = imagedata.Download(opts.ImageURL, "watermark_url", nil, nil); err != nil {
+		if wmData, err = imagedata.Download(opts.ImageURL, "watermark_url", imagedata.DownloadOptions{Header: nil, CookieJar: nil}, security.DefaultOptions()); err != nil {
 			return err
 		}
 	}
