@@ -105,7 +105,7 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 }
 
 func watermark(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if !po.Watermark.Enabled || (len(po.Watermark.ImageURL) <= 0 && imagedata.Watermark == nil) {
+	if !po.Watermark.Enabled || (len(po.Watermark.ImageURL) == 0 && imagedata.Watermark == nil) {
 		return nil
 	}
 
