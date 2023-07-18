@@ -15,6 +15,10 @@
 #define VIPS_GIF_RESOLUTION_LIMITED \
   (VIPS_MAJOR_VERSION == 8 && VIPS_MINOR_VERSION <= 12)
 
+#ifndef VIPS_META_BITS_PER_SAMPLE
+#define VIPS_META_BITS_PER_SAMPLE "palette-bit-depth"
+#endif
+
 int
 vips_initialize() {
   return vips_init("imgproxy");
@@ -134,15 +138,20 @@ vips_get_orientation(VipsImage *image) {
 }
 
 int
-vips_get_palette_bit_depth(VipsImage *image) {
-  int palette_bit_depth;
+vips_get_bits_per_sample(VipsImage *image) {
+  int bits_per_sample;
 
   if (
-    vips_image_get_typeof(image, "palette-bit-depth") == G_TYPE_INT &&
-    vips_image_get_int(image, "palette-bit-depth", &palette_bit_depth) == 0
-  ) return palette_bit_depth;
+    vips_image_get_typeof(image, VIPS_META_BITS_PER_SAMPLE) == G_TYPE_INT &&
+    vips_image_get_int(image, VIPS_META_BITS_PER_SAMPLE, &bits_per_sample) == 0
+  ) return bits_per_sample;
 
   return 0;
+}
+
+void
+vips_remove_bits_per_sample(VipsImage *image) {
+  vips_image_remove(image, VIPS_META_BITS_PER_SAMPLE);
 }
 
 VipsBandFormat
@@ -200,17 +209,18 @@ vips_resize_go(VipsImage *in, VipsImage **out, double wscale, double hscale) {
   VipsBandFormat format = vips_band_format(in);
 
   VipsImage *base = vips_image_new();
-  VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 3);
+  VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 4);
 
   int res =
     vips_premultiply(in, &t[0], NULL) ||
-    vips_resize(t[0], &t[1], wscale, "vscale", hscale, NULL) ||
-    vips_unpremultiply(t[1], &t[2], NULL) ||
-    vips_cast(t[2], out, format, NULL);
+    vips_cast(t[0], &t[1], format, NULL) ||
+    vips_resize(t[1], &t[2], wscale, "vscale", hscale, NULL) ||
+    vips_unpremultiply(t[2], &t[3], NULL) ||
+    vips_cast(t[3], out, format, NULL);
 
   clear_image(&base);
 
-  return 0;
+  return res;
 }
 
 int
@@ -306,14 +316,17 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
   double sharp_sigma, int pixelate_pixels) {
 
   VipsImage *base = vips_image_new();
-  VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 9);
+  VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 10);
 
   VipsInterpretation interpretation = in->Type;
   VipsBandFormat format = in->BandFmt;
   gboolean premultiplied = FALSE;
 
   if ((blur_sigma > 0 || sharp_sigma > 0) && vips_image_hasalpha(in)) {
-    if (vips_premultiply(in, &t[0], NULL)) {
+    if (
+      vips_premultiply(in, &t[0], NULL) ||
+      vips_cast(t[0], &t[1], format, NULL)
+    ) {
       clear_image(&base);
       return 1;
     }
@@ -323,21 +336,21 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
   }
 
   if (blur_sigma > 0.0) {
-    if (vips_gaussblur(in, &t[1], blur_sigma, NULL)) {
-      clear_image(&base);
-      return 1;
-    }
-
-    in = t[1];
-  }
-
-  if (sharp_sigma > 0.0) {
-    if (vips_sharpen(in, &t[2], "sigma", sharp_sigma, NULL)) {
+    if (vips_gaussblur(in, &t[2], blur_sigma, NULL)) {
       clear_image(&base);
       return 1;
     }
 
     in = t[2];
+  }
+
+  if (sharp_sigma > 0.0) {
+    if (vips_sharpen(in, &t[3], "sigma", sharp_sigma, NULL)) {
+      clear_image(&base);
+      return 1;
+    }
+
+    in = t[3];
   }
 
   pixelate_pixels = VIPS_MIN(pixelate_pixels, VIPS_MAX(in->Xsize, in->Ysize));
@@ -352,46 +365,46 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
     th = (int)(VIPS_CEIL((double)h / pixelate_pixels)) * pixelate_pixels;
 
     if (tw > w || th > h) {
-      if (vips_embed(in, &t[3], 0, 0, tw, th, "extend", VIPS_EXTEND_MIRROR, NULL)) {
+      if (vips_embed(in, &t[4], 0, 0, tw, th, "extend", VIPS_EXTEND_MIRROR, NULL)) {
         clear_image(&base);
         return 1;
       }
 
-      in = t[3];
+      in = t[4];
     }
 
     if (
-      vips_shrink(in, &t[4], pixelate_pixels, pixelate_pixels, NULL) ||
-      vips_zoom(t[4], &t[5], pixelate_pixels, pixelate_pixels, NULL)
+      vips_shrink(in, &t[5], pixelate_pixels, pixelate_pixels, NULL) ||
+      vips_zoom(t[5], &t[6], pixelate_pixels, pixelate_pixels, NULL)
     ) {
         clear_image(&base);
         return 1;
     }
 
-    in = t[5];
+    in = t[6];
 
     if (tw > w || th > h) {
-      if (vips_extract_area(in, &t[6], 0, 0, w, h, NULL)) {
+      if (vips_extract_area(in, &t[7], 0, 0, w, h, NULL)) {
           clear_image(&base);
           return 1;
       }
 
-      in = t[6];
+      in = t[7];
     }
   }
 
   if (premultiplied) {
-    if (vips_unpremultiply(in, &t[7], NULL)) {
+    if (vips_unpremultiply(in, &t[8], NULL)) {
       clear_image(&base);
       return 1;
     }
 
-    in = t[7];
+    in = t[8];
   }
 
   int res =
-    vips_colourspace(in, &t[8], interpretation, NULL) ||
-    vips_cast(t[8], out, format, NULL);
+    vips_colourspace(in, &t[9], interpretation, NULL) ||
+    vips_cast(t[9], out, format, NULL);
 
   clear_image(&base);
 
@@ -531,7 +544,7 @@ vips_embed_go(VipsImage *in, VipsImage **out, int x, int y, int width, int heigh
 }
 
 int
-vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, double opacity) {
+vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, int left, int top, double opacity) {
   VipsImage *base = vips_image_new();
   VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 7);
 
@@ -559,7 +572,11 @@ vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, doubl
   int had_alpha = vips_image_hasalpha(in);
 
   if (
-    vips_composite2(in, watermark, &t[5], VIPS_BLEND_MODE_OVER, "compositing_space", in->Type, NULL) ||
+    vips_composite2(
+      in, watermark, &t[5], VIPS_BLEND_MODE_OVER,
+      "x", left, "y", top, "compositing_space", in->Type,
+      NULL
+    ) ||
     vips_cast(t[5], &t[6], vips_image_get_format(in), NULL)
   ) {
     clear_image(&base);
@@ -602,7 +619,7 @@ vips_strip(VipsImage *in, VipsImage **out, int keep_exif_copyright) {
 
     if (
       (strcmp(name, VIPS_META_ICC_NAME) == 0) ||
-      (strcmp(name, "palette-bit-depth") == 0) ||
+      (strcmp(name, VIPS_META_BITS_PER_SAMPLE) == 0) ||
       (strcmp(name, "width") == 0) ||
       (strcmp(name, "height") == 0) ||
       (strcmp(name, "bands") == 0) ||
@@ -615,7 +632,8 @@ vips_strip(VipsImage *in, VipsImage **out, int keep_exif_copyright) {
       (strcmp(name, "yres") == 0) ||
       (strcmp(name, "vips-loader") == 0) ||
       (strcmp(name, "background") == 0) ||
-      (strcmp(name, "vips-sequential") == 0)
+      (strcmp(name, "vips-sequential") == 0) ||
+      (strcmp(name, "imgproxy-dpr-scale") == 0)
     ) continue;
 
     if (keep_exif_copyright) {
@@ -655,8 +673,8 @@ vips_pngsave_go(VipsImage *in, void **buf, size_t *len, int interlace, int quant
     else if (colors > 4) bitdepth = 4;
     else if (colors > 2) bitdepth = 2;
   } else {
-    bitdepth = vips_get_palette_bit_depth(in);
-    if (bitdepth) {
+    bitdepth = vips_get_bits_per_sample(in);
+    if (bitdepth && bitdepth <= 8) {
       if (bitdepth > 4) bitdepth = 8;
       else if (bitdepth > 2) bitdepth = 4;
       quantize = 1;
@@ -694,7 +712,9 @@ vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality) {
 int
 vips_gifsave_go(VipsImage *in, void **buf, size_t *len) {
 #if VIPS_SUPPORT_GIFSAVE
-  return vips_gifsave_buffer(in, buf, len, NULL);
+  int bitdepth = vips_get_bits_per_sample(in);
+  if (bitdepth <= 0 || bitdepth > 8 ) bitdepth = 8;
+  return vips_gifsave_buffer(in, buf, len, "bitdepth", bitdepth, NULL);
 #else
   vips_error("vips_gifsave_go", "Saving GIF is not supported (libvips 8.12+ reuired)");
   return 1;

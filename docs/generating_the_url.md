@@ -135,7 +135,7 @@ When set, imgproxy will multiply the image dimensions according to these factors
 
 Can be combined with `width` and `height` options. In this case, imgproxy calculates scale factors for the provided size and then multiplies it with the provided zoom factors.
 
-**📝 Note:** Unlike [dpr](#dpr), `zoom` doesn't set the `Content-DPR` header in the response.
+**📝 Note:** Unlike the `dpr` option, the `zoom` option doesn't affect gravities offsets, watermark offsets, and paddings.
 
 Default: `1`
 
@@ -147,7 +147,7 @@ dpr:%dpr
 
 When set, imgproxy will multiply the image dimensions according to this factor for HiDPI (Retina) devices. The value must be greater than 0.
 
-**📝 Note:** `dpr` also sets the `Content-DPR` header in the response so the browser can correctly render the image.
+**📝 Note:** The `dpr` option affects gravities offsets, watermark offsets, and paddings to make the resulting image structures with and without the `dpr` option applied match.
 
 Default: `1`
 
@@ -397,14 +397,14 @@ When set, imgproxy will apply the pixelate filter to the resulting image. The va
 
 Default: disabled
 
-### Unsharpening![pro](./assets/pro.svg) :id=unsharpening
+### Unsharp masking![pro](./assets/pro.svg) :id=unsharp-masking
 
 ```
-unsharpening:%mode:%weight:%dividor
-ush:%mode:%weight:%dividor
+unsharp_masking:%mode:%weight:%divider
+ush:%mode:%weight:%divider
 ```
 
-Allows redefining unsharpening options. All arguments have the same meaning as [Unsharpening](configuration.md#unsharpening) configs. All arguments are optional and can be omitted.
+Allows redefining unsharp masking options. All arguments have the same meaning as [Unsharp masking](configuration.md#unsharp-masking) configs. All arguments are optional and can be omitted.
 
 ### Blur detections![pro](./assets/pro.svg) :id=blur-detections
 
@@ -552,6 +552,18 @@ kcr:%keep_copyright
 ```
 
 When set to `1`, `t` or `true`, imgproxy will not remove copyright info while stripping metadata. This is normally controlled by the [IMGPROXY_KEEP_COPYRIGHT](configuration.md#miscellaneous) configuration but this procesing option allows the configuration to be set for each request.
+
+### DPI![pro](./assets/pro.svg) :id=dpi
+
+```
+dpi:%dpi
+```
+
+When set, imgproxy will replace the image's DPI metadata with the provided value. When set to `0`, imgproxy won't change the image's DPI or will reset it to the default value if the image's metadata should be stripped.
+
+**📝 Note:** This processing option takes effect whether imgproxy should strip the image's metadata or not.
+
+Default: `0`
 
 ### Strip color profile
 
@@ -766,11 +778,14 @@ Default: empty
 ### Filename
 
 ```
-filename:%string
-fn:%string
+filename:%filename:%encoded
+fn:%filename:%encoded
 ```
 
-Defines a filename for the `Content-Disposition` header. When not specified, imgproxy will get the filename from the source url.
+Defines a filename for the `Content-Disposition` header. When not specified, imgproxy will get the filename from the source URL.
+
+* `filename`: escaped or URL-safe Base64-encoded filename to be used in the `Content-Disposition` header
+* `encoded`: _(optionsl)_ identifies if `filename` is Base64-encoded. Set it to `1`, `t`, or `true` if you encoded the `filename` value with URL-safe Base64 encoding.
 
 Default: empty
 
@@ -872,7 +887,7 @@ When using an encoded source URL, you can specify the [extension](#extension) af
 /aHR0cDovL2V4YW1w/bGUuY29tL2ltYWdl/cy9jdXJpb3NpdHku/anBn.png
 ```
 
-### Encrypted with AES-CBC
+### Encrypted with AES-CBC![pro](./assets/pro.svg) :id=encrypted-with-aes-cbc
 
 The source URL can be encrypted with the AES-CBC algorithm, prepended by the `/enc/` segment. The encrypted URL can be split with `/` as desired:
 

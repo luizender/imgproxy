@@ -42,22 +42,23 @@ func readAndCheckImage(r io.Reader, contentLength int, secopts security.Options)
 			return nil, ErrSourceImageTypeNotSupported
 		}
 
-		return nil, checkTimeoutErr(err)
+		return nil, wrapError(err)
 	}
 
 	if err = security.CheckDimensions(meta.Width(), meta.Height(), 1, secopts); err != nil {
 		buf.Reset()
 		cancel()
-		return nil, err
+
+		return nil, wrapError(err)
 	}
 
-	if contentLength > buf.Cap() {
-		buf.Grow(contentLength - buf.Len())
-	}
+	downloadBufPool.GrowBuffer(buf, contentLength)
 
 	if err = br.Flush(); err != nil {
+		buf.Reset()
 		cancel()
-		return nil, checkTimeoutErr(err)
+
+		return nil, wrapError(err)
 	}
 
 	return &ImageData{

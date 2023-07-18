@@ -2,6 +2,86 @@
 
 ## [Unreleased]
 
+## [3.18.2] - 2023-07-13
+### Fix
+- Fix saving to JPEG when using linear colorspace.
+- Fix the `Cache-Control` and `Expires` headers passthrough when SVG is sanitized or fixed.
+- (pro) Fix complexity calculation for still images.
+- (docker) Fix crashes during some resizing cases.
+
+## [3.18.1] - 2023-06-29
+### Change
+- Change maximum and default values of `IMGPROXY_AVIF_SPEED` to `9`.
+- (pro) Fix detection of some videos.
+- (pro) Better calculation of the image complexity during choosing the best format.
+- (docker) Fix freezes and crashes introduced in v3.18.0 by liborc.
+
+## [3.18.0] - 2023-05-31
+### Add
+- Add `IMGPROXY_URL_REPLACEMENTS` config.
+- (pro) Add `IMGPROXY_STRIP_METADATA_DPI` config.
+- (pro) Add [dpi](https://docs.imgproxy.net/latest/generating_the_url?id=dpi) processing option.
+- (pro) Add WebP EXIF and XMP to the `/info` response.
+- (pro) Add Photoshop resolution data to the `/info` response.
+
+### Change
+- Preserve GIF's bit-per-sample.
+- Respond with 422 on error during image loading.
+
+### Fix
+- (pro) Fix applying the `resizing_algorithm` processing option when resizing images with an alpha channel.
+
+## [3.17.0] - 2023-05-10
+### Add
+- Add `process_resident_memory_bytes`, `process_virtual_memory_bytes`, `go_memstats_sys_bytes`, `go_memstats_heap_idle_bytes`, `go_memstats_heap_inuse_bytes`, `go_goroutines`, `go_threads`, `buffer_default_size_bytes`, `buffer_max_size_bytes`, and `buffer_size_bytes` metrics to OpenTelemetry.
+- Add support for the `Last-Modified` response header and the `If-Modified-Since` request header (controlled by the `IMGPROXY_USE_LAST_MODIFIED` config).
+- Add `IMGPROXY_S3_ASSUME_ROLE_ARN` config.
+- Add `IMGPROXY_MALLOC` Docker-only config.
+
+### Change
+- Optimized memory buffers pooling for better performance and memory reusage.
+- Optimized watermarks application.
+
+### Fix
+- Fix crushes when `watermark_text` has an invalid value.
+
+## [3.16.1] - 2023-04-26
+### Fix
+- Fix crashes in cases where the `max_bytes` processing option was used and image saving failed.
+- Fix error when using the `extend` or `extend_aspect_ratio` processing option while setting zero width or height.
+- Fix color loss when applying a watermark with a palette on an image without a palette.
+- (pro) Fix crashes when using `IMGPROXY_SMART_CROP_FACE_DETECTION` with large `IMGPROXY_CONCURRENCY`.
+- (pro) Fix watermark scaling when neither watermark scale nor watermark size is specified.
+
+## [3.16.0] - 2023-04-18
+### Add
+- Add support for `Sec-CH-DPR` and `Sec-CH-Width` client hints.
+- Add support for Base64-encoded `filename` processing option values.
+- Add `IMGPROXY_REQUEST_HEADERS_PASSTHROUGH` and `IMGPROXY_RESPONSE_HEADERS_PASSTHROUGH` configs.
+
+### Change
+- Improved object-oriented crop.
+
+### Fix
+- Fix detection of dead HTTP/2 connections.
+- Fix the way the `dpr` processing option affects offsets and paddings.
+
+### Remove
+- Remove suport for `Viewport-Width` client hint.
+- Don't set `Content-DPR` header (deprecated in the specification).
+
+## [3.15.0] - 2023-04-10
+### Add
+- Add the `IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES`, `IMGPROXY_ALLOW_LINK_LOCAL_SOURCE_ADDRESSES`, and `IMGPROXY_ALLOW_PRIVATE_SOURCE_ADDRESSES` configs.
+
+### Change
+- Connecting to loopback, link-local multicast, and link-local unicast IP addresses when requesting source images is prohibited by default.
+- Tuned source image downloading flow.
+- Disable extension checking if the `raw` processing option is used.
+
+### Fix
+- (pro) Fix face detection during advanced smart crop in some cases.
+
 ## [3.14.0] - 2023-03-07
 ## Add
 - Add [extend_aspect_ratio](https://docs.imgproxy.net/latest/generating_the_url?id=extend-aspect-ratio) processing option.
@@ -36,7 +116,7 @@
 - (pro) Allow usage of floating-point numbers in the `IMGPROXY_VIDEO_THUMBNAIL_SECOND` config and the `video_thumbnail_second` processing option.
 
 ### Fix
-- Fix craches in some cases when using OpenTelemetry in Amazon ECS.
+- Fix crashes in some cases when using OpenTelemetry in Amazon ECS.
 - (pro) Fix saving of GIF with too small frame delay to MP4
 
 ## [3.12.0] - 2022-12-11

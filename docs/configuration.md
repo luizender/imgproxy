@@ -44,9 +44,12 @@ echo $(xxd -g 2 -l 64 -p /dev/random | tr -d '\n')
 * `IMGPROXY_USER_AGENT`: the User-Agent header that will be sent with the source image request. Default: `imgproxy/%current_version`
 * `IMGPROXY_USE_ETAG`: when set to `true`, enables using the [ETag](https://en.wikipedia.org/wiki/HTTP_ETag) HTTP header for HTTP cache control. Default: `false`
 * `IMGPROXY_ETAG_BUSTER`: change this to change ETags for all the images. Default: blank
+* `IMGPROXY_USE_LAST_MODIFIED`: when set to `true`, enables using the [Last-Modified](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified) HTTP header for HTTP cache control. Default: `false`
 * `IMGPROXY_CUSTOM_REQUEST_HEADERS`: ![pro](./assets/pro.svg) list of custom headers that imgproxy will send while requesting the source image, divided by `\;` (can be redefined by `IMGPROXY_CUSTOM_HEADERS_SEPARATOR`). Example: `X-MyHeader1=Lorem\;X-MyHeader2=Ipsum`
 * `IMGPROXY_CUSTOM_RESPONSE_HEADERS`: ![pro](./assets/pro.svg) a list of custom response headers, separated by `\;` (can be redefined by `IMGPROXY_CUSTOM_HEADERS_SEPARATOR`). Example: `X-MyHeader1=Lorem\;X-MyHeader2=Ipsum`
 * `IMGPROXY_CUSTOM_HEADERS_SEPARATOR`: ![pro](./assets/pro.svg) a string that will be used as a custom header separator. Default: `\;`
+* `IMGPROXY_REQUEST_HEADERS_PASSTHROUGH`: ![pro](./assets/pro.svg) a list of names of incoming request headers that should be passed through to the source image request.
+* `IMGPROXY_RESPONSE_HEADERS_PASSTHROUGH`: ![pro](./assets/pro.svg) a list of names of source image response headers that should be passed through to the imgproxy response.
 * `IMGPROXY_ENABLE_DEBUG_HEADERS`: when set to `true`, imgproxy will add debug headers to the response. Default: `false`. The following headers will be added:
   * `X-Origin-Content-Length`: the size of the source image
   * `X-Origin-Width`: the width of the source image
@@ -102,7 +105,11 @@ You can limit allowed source URLs with the following variable:
 
   ✅ Good: `http://example.com/`
 
-If the trailing slash is absent, `http://example.com@baddomain.com` would be a permissable URL, however, the request would be made to `baddomain.com`.
+  If the trailing slash is absent, `http://example.com@baddomain.com` would be a permissable URL, however, the request would be made to `baddomain.com`.
+
+* `IMGPROXY_ALLOW_LOOPBACK_SOURCE_ADDRESSES`: when `true`, allows connecting to loopback IP addresses (`127.0.0.1`-`127.255.255.255` and IPv6 analogues) when requesting source images. Default: `false`
+* `IMGPROXY_ALLOW_LINK_LOCAL_SOURCE_ADDRESSES`:  when `true`, allows connecting to link-local multicast and unicast IP addresses (`224.0.0.1`-`224.0.0.255`, `169.254.0.1`-`169.254.255.255`, and IPv6 analogues) when requesting source images. Default: `false`
+* `IMGPROXY_ALLOW_PRIVATE_SOURCE_ADDRESSES`: when `true`, allows connecting to private IP addresses (`10.0.0.0 - 10.255.255.255`, `172.16.0.0 - 172.31.255.255`, `192.168.0.0 - 192.168.255.255`, and IPv6 analogues) when requesting source images. Default: `true`
 
 * `IMGPROXY_SANITIZE_SVG`: when `true`, imgproxy will remove scripts from SVG images to prevent XSS attacks. Defaut: `true`
 
@@ -169,7 +176,7 @@ When cookie forwarding is activated, by default, imgproxy assumes the scope of t
 
 ### Advanced AVIF compression
 
-* `IMGPROXY_AVIF_SPEED`: controls the CPU effort spent improving compression. The lowest speed is at 0 and the fastest is at 8. Default: `8`
+* `IMGPROXY_AVIF_SPEED`: controls the CPU effort spent improving compression. The lowest speed is at 0 and the fastest is at 9. Default: `9`
 
 ### Autoquality
 
@@ -245,11 +252,11 @@ Check out the [Best format](best_format.md) guide to learn more.
 
 ## Client Hints support
 
-imgproxy can use the `Width`, `Viewport-Width` or `DPR` HTTP headers to determine default width and DPR options using Client Hints. This feature is disabled by default and can be enabled by the following option:
+imgproxy can use the `Width` and `DPR` HTTP headers to determine default width and DPR options using Client Hints. This feature is disabled by default and can be enabled by the following option:
 
 * `IMGPROXY_ENABLE_CLIENT_HINTS`: enables Client Hints support to determine default width and DPR options. Read more details [here](https://developers.google.com/web/updates/2015/09/automating-resource-selection-with-client-hints) about Client Hints.
 
-**⚠️ Warning:** Headers cannot be signed. This means that an attacker can bypass your CDN cache by changing the `Width`, `Viewport-Width` or `DPR` HTTP headers. Keep this in mind when configuring your production caching setup.
+**⚠️ Warning:** Headers cannot be signed. This means that an attacker can bypass your CDN cache by changing the `Width` or `DPR` HTTP headers. Keep this in mind when configuring your production caching setup.
 
 ## Video thumbnails
 
@@ -272,16 +279,16 @@ imgproxy Pro can extract specific video frames to create thumbnails. This featur
 
 Read more about watermarks in the [Watermark](watermark.md) guide.
 
-## Unsharpening
+## Unsharp masking
 
-imgproxy Pro can apply an unsharpening mask to your images.
+imgproxy Pro can apply unsharp masking to your images.
 
-* `IMGPROXY_UNSHARPENING_MODE`: ![pro](./assets/pro.svg) controls when an unsharpenning mask should be applied. The following modes are supported:
-  * `auto`: _(default)_ apply an unsharpening mask only when an image is downscaled and the `sharpen` option has not been set.
-  * `none`: the unsharpening mask is not applied.
-  * `always`: always applies the unsharpening mask.
-* `IMGPROXY_UNSHARPENING_WEIGHT`: ![pro](./assets/pro.svg) a floating-point number that defines how neighboring pixels will affect the current pixel. The greater the value, the sharper the image. This value should be greater than zero. Default: `1`
-* `IMGPROXY_UNSHARPENING_DIVIDOR`: ![pro](./assets/pro.svg) a floating-point number that defines the unsharpening strength. The lesser the value, the sharper the image. This value be greater than zero. Default: `24`
+* `IMGPROXY_UNSHARP_MASKING_MODE`: ![pro](./assets/pro.svg) controls when unsharp masking should be applied. The following modes are supported:
+  * `auto`: _(default)_ apply unsharp masking only when an image is downscaled and the `sharpen` option has not been set.
+  * `none`: unsharp masking is not applied.
+  * `always`: always applies unsharp masking.
+* `IMGPROXY_UNSHARP_MASKING_WEIGHT`: ![pro](./assets/pro.svg) a floating-point number that defines how neighboring pixels will affect the current pixel. The greater the value, the sharper the image. This value should be greater than zero. Default: `1`
+* `IMGPROXY_UNSHARP_MASKING_DIVIDER`: ![pro](./assets/pro.svg) a floating-point number that defines unsharp masking strength. The lesser the value, the sharper the image. This value be greater than zero. Default: `24`
 
 ## Smart crop
 
@@ -399,6 +406,16 @@ imgproxy can process files from OpenStack Object Storage, but this feature is di
 
 Check out the [Serving files from OpenStack Object Storage](serving_files_from_openstack_swift.md) guide to learn more.
 
+## Source image URLs
+
+* `IMGPROXY_BASE_URL`: a base URL prefix that will be added to each source image URL. For example, if the base URL is `http://example.com/images` and `/path/to/image.png` is requested, imgproxy will download the source image from `http://example.com/images/path/to/image.png`. If the image URL already contains the prefix, it won't be added. Default: blank
+
+* `IMGPROXY_URL_REPLACEMENTS`: a list of `pattern=replacement` pairs, semicolon (`;`) divided. imgproxy will replace source URL prefixes matching the pattern with the corresponding replacement. Wildcards can be included in patterns with `*` to match all characters except `/`. `${N}` in replacement strings will be replaced with wildcard values, where `N` is the number of the wildcard. Examples:
+  * `mys3://=s3://my_bucket/images/` will replace `mys3://image01.jpg` with `s3://my_bucket/images/image01.jpg`
+  * `mys3://*/=s3://my_bucket/${1}/images` will replace `mys3://items/image01.jpg` with `s3://my_bucket/items/images/image01.jpg`
+
+**📝 Note:** Replacements defined in `IMGPROXY_URL_REPLACEMENTS` are applied before `IMGPROXY_BASE_URL` is added.
+
 ## Metrics
 
 ### New Relic :id=new-relic-metrics
@@ -513,14 +530,18 @@ imgproxy can send logs to syslog, but this feature is disabled by default. To en
 * `IMGPROXY_DOWNLOAD_BUFFER_SIZE`: the initial size (in bytes) of a single download buffer. When set to zero, initializes empty download buffers. Default: `0`
 * `IMGPROXY_FREE_MEMORY_INTERVAL`: the interval (in seconds) at which unused memory will be returned to the OS. Default: `10`
 * `IMGPROXY_BUFFER_POOL_CALIBRATION_THRESHOLD`: the number of buffers that should be returned to a pool before calibration. Default: `1024`
+* `IMGPROXY_MALLOC`: _(Docker only)_ malloc implementation to use. The following implementations are supported:
+  * `malloc`: standard malloc implementation
+  * `jemalloc`: https://jemalloc.net/
+  * `tcmalloc`: https://github.com/google/tcmalloc
 
 ## Miscellaneous
 
-* `IMGPROXY_BASE_URL`: a base URL prefix that will be added to each requested image URL. For example, if the base URL is `http://example.com/images` and `/path/to/image.png` is requested, imgproxy will download the source image from `http://example.com/images/path/to/image.png`. If the image URL already contains the prefix, it won't be added. Default: blank
 * `IMGPROXY_USE_LINEAR_COLORSPACE`: when `true`, imgproxy will process images in linear colorspace. This will slow down processing. Note that images won't be fully processed in linear colorspace while shrink-on-load is enabled (see below).
 * `IMGPROXY_DISABLE_SHRINK_ON_LOAD`: when `true`, disables shrink-on-load for JPEGs and WebP files. Allows processing the entire image in linear colorspace but dramatically slows down resizing and increases memory usage when working with large images.
 * `IMGPROXY_STRIP_METADATA`: when `true`, imgproxy will strip all metadata (EXIF, IPTC, etc.) from JPEG and WebP output images. Default: `true`
 * `IMGPROXY_KEEP_COPYRIGHT`: when `true`, imgproxy will not remove copyright info while stripping metadata. Default: `true`
+* `IMGPROXY_STRIP_METADATA_DPI`: ![pro](./assets/pro.svg) the DPI metadata value that should be set for the image when its metadata is stripped. Default: `72.0`
 * `IMGPROXY_STRIP_COLOR_PROFILE`: when `true`, imgproxy will transform the embedded color profile (ICC) to sRGB and remove it from the image. Otherwise, imgproxy will try to keep it as is. Default: `true`
 * `IMGPROXY_AUTO_ROTATE`: when `true`, imgproxy will automatically rotate images based on the EXIF Orientation parameter (if available in the image meta data). The orientation tag will be removed from the image in all cases. Default: `true`
 * `IMGPROXY_ENFORCE_THUMBNAIL`: when `true` and the source image has an embedded thumbnail, imgproxy will always use the embedded thumbnail instead of the main image. Currently, only thumbnails embedded in `heic` and `avif` are supported. Default: `false`

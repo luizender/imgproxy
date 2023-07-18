@@ -49,7 +49,7 @@ func initProcessingHandler() {
 	}
 
 	if config.EnableClientHints {
-		vary = append(vary, "DPR", "Viewport-Width", "Width")
+		vary = append(vary, "Sec-CH-DPR", "DPR", "Sec-CH-Width", "Width")
 	}
 
 	headerVaryValue = strings.Join(vary, ", ")
@@ -91,6 +91,14 @@ func setCacheControl(rw http.ResponseWriter, force *time.Time, originHeaders map
 	}
 }
 
+func setLastModified(rw http.ResponseWriter, originHeaders map[string]string) {
+	if config.LastModifiedEnabled {
+		if val, ok := originHeaders["Last-Modified"]; ok && len(val) != 0 {
+			rw.Header().Set("Last-Modified", val)
+		}
+	}
+}
+
 func setVary(rw http.ResponseWriter) {
 	if len(headerVaryValue) > 0 {
 		rw.Header().Set("Vary", headerVaryValue)
@@ -117,11 +125,8 @@ func respondWithImage(reqID string, r *http.Request, rw http.ResponseWriter, sta
 	rw.Header().Set("Content-Type", resultData.Type.Mime())
 	rw.Header().Set("Content-Disposition", contentDisposition)
 
-	if po.Dpr != 1 {
-		rw.Header().Set("Content-DPR", strconv.FormatFloat(po.Dpr, 'f', 2, 32))
-	}
-
 	setCacheControl(rw, po.Expires, originData.Headers)
+	setLastModified(rw, originData.Headers)
 	setVary(rw)
 	setCanonical(rw, originURL)
 
@@ -233,13 +238,8 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 	po, imageURL, err := options.ParsePath(path, r.Header)
 	checkErr(ctx, "path_parsing", err)
 
-	if !security.VerifySourceURL(imageURL) {
-		sendErrAndPanic(ctx, "security", ierrors.New(
-			404,
-			fmt.Sprintf("Source URL is not allowed: %s", imageURL),
-			"Invalid source",
-		))
-	}
+	err = security.VerifySourceURL(imageURL)
+	checkErr(ctx, "security", err)
 
 	if po.Raw {
 		streamOriginImage(ctx, reqID, r, rw, po, imageURL)
@@ -266,6 +266,12 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 			if imgEtag := etagHandler.ImageEtagExpected(); len(imgEtag) != 0 {
 				imgRequestHeader.Set("If-None-Match", imgEtag)
 			}
+		}
+	}
+
+	if config.LastModifiedEnabled {
+		if modifiedSince := r.Header.Get("If-Modified-Since"); len(modifiedSince) != 0 {
+			imgRequestHeader.Set("If-Modified-Since", modifiedSince)
 		}
 	}
 
@@ -303,13 +309,15 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 			checkErr(ctx, "download", err)
 		}
 
-		return imagedata.Download(imageURL, "source image", downloadOpts, po.SecurityOptions)
+		return imagedata.Download(ctx, imageURL, "source image", downloadOpts, po.SecurityOptions)
 	}()
 
 	if err == nil {
 		defer originData.Close()
-	} else if nmErr, ok := err.(*imagedata.ErrorNotModified); ok && config.ETagEnabled {
-		rw.Header().Set("ETag", etagHandler.GenerateExpectedETag())
+	} else if nmErr, ok := err.(*imagedata.ErrorNotModified); ok {
+		if config.ETagEnabled && len(etagHandler.ImageEtagExpected()) != 0 {
+			rw.Header().Set("ETag", etagHandler.GenerateExpectedETag())
+		}
 		respondWithNotModified(reqID, r, rw, po, imageURL, nmErr.Headers)
 		return
 	} else {
@@ -354,7 +362,7 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 		// Don't process SVG
 		if originData.Type == imagetype.SVG {
 			if config.SanitizeSvg {
-				sanitized, svgErr := svg.Satitize(originData)
+				sanitized, svgErr := svg.Sanitize(originData)
 				checkErr(ctx, "svg_processing", svgErr)
 
 				// Since we'll replace origin data, it's better to close it to return

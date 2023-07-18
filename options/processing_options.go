@@ -1,6 +1,7 @@
 package options
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -821,11 +822,20 @@ func applyRawOption(po *ProcessingOptions, args []string) error {
 }
 
 func applyFilenameOption(po *ProcessingOptions, args []string) error {
-	if len(args) > 1 {
+	if len(args) > 2 {
 		return fmt.Errorf("Invalid filename arguments: %v", args)
 	}
 
 	po.Filename = args[0]
+
+	if len(args) > 1 && parseBoolOption(args[1]) {
+		decoded, err := base64.RawURLEncoding.DecodeString(po.Filename)
+		if err != nil {
+			return fmt.Errorf("Invalid filename encoding: %s", err)
+		}
+
+		po.Filename = string(decoded)
+	}
 
 	return nil
 }
@@ -1105,19 +1115,23 @@ func defaultProcessingOptions(headers http.Header) (*ProcessingOptions, error) {
 	}
 
 	if config.EnableClientHints {
-		if headerDPR := headers.Get("DPR"); len(headerDPR) > 0 {
+		headerDPR := headers.Get("Sec-CH-DPR")
+		if len(headerDPR) == 0 {
+			headerDPR = headers.Get("DPR")
+		}
+		if len(headerDPR) > 0 {
 			if dpr, err := strconv.ParseFloat(headerDPR, 64); err == nil && (dpr > 0 && dpr <= maxClientHintDPR) {
 				po.Dpr = dpr
 			}
 		}
-		if headerViewportWidth := headers.Get("Viewport-Width"); len(headerViewportWidth) > 0 {
-			if vw, err := strconv.Atoi(headerViewportWidth); err == nil {
-				po.Width = vw
-			}
+
+		headerWidth := headers.Get("Sec-CH-Width")
+		if len(headerWidth) == 0 {
+			headerWidth = headers.Get("Width")
 		}
-		if headerWidth := headers.Get("Width"); len(headerWidth) > 0 {
+		if len(headerWidth) > 0 {
 			if w, err := strconv.Atoi(headerWidth); err == nil {
-				po.Width = imath.Scale(w, 1/po.Dpr)
+				po.Width = imath.Shrink(w, po.Dpr)
 			}
 		}
 	}
@@ -1156,7 +1170,7 @@ func parsePathOptions(parts []string, headers http.Header) (*ProcessingOptions, 
 		return nil, "", err
 	}
 
-	if len(extension) > 0 {
+	if !po.Raw && len(extension) > 0 {
 		if err = applyFormatOption(po, []string{extension}); err != nil {
 			return nil, "", err
 		}
@@ -1183,7 +1197,7 @@ func parsePathPresets(parts []string, headers http.Header) (*ProcessingOptions, 
 		return nil, "", err
 	}
 
-	if len(extension) > 0 {
+	if !po.Raw && len(extension) > 0 {
 		if err = applyFormatOption(po, []string{extension}); err != nil {
 			return nil, "", err
 		}

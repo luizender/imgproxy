@@ -36,7 +36,7 @@ The source URL can be encoded with URL-safe Base64. The encoded URL can be split
 /aHR0cDovL2V4YW1w/bGUuY29tL2ltYWdl/cy9jdXJpb3NpdHku/anBn
 ```
 
-#### Encrypted with AES-CBC
+#### Encrypted with AES-CBC![pro](./assets/pro.svg) :id=encrypted-with-aes-cbc
 
 The source URL can be encrypted with the AES-CBC algorithm, prepended by the `/enc/` segment. The encrypted URL can be split with `/` as desired:
 
@@ -55,6 +55,7 @@ imgproxy responses with a JSON body and returns the following info:
 * `exif`: Exif data
 * `iptc`: IPTC data
 * `xmp`: XMP data
+* `photoshop`: Photoshop metadata (currently, only the resolution data)
 * `video_meta`: metadata from the video
 
 **📝 Note:** There are lots of IPTC tags in the spec, but imgproxy supports only a few of them. If you need some tags to be supported, just contact us.
@@ -97,6 +98,16 @@ imgproxy responses with a JSON body and returns the following info:
     },
     "photoshop": {
       "DateCreated": "2016-09-11T18:44:50.003"
+    }
+  },
+  "photoshop": {
+    "resolution": {
+      "XResolution": 240,
+      "XResolutionUnit": "inches",
+      "WidthUnit": "inches",
+      "YResolution": 240,
+      "YResolutionUnit": "inches",
+      "HeightUnit": "inches"
     }
   }
 }

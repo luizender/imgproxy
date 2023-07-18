@@ -174,7 +174,12 @@ func transformAnimated(ctx context.Context, img *vips.Image, po *options.Process
 	}
 
 	if watermarkEnabled && (len(po.Watermark.ImageURL) > 0 || imagedata.Watermark != nil) {
-		if err = applyWatermark(img, imagedata.Watermark, &po.Watermark, framesCount); err != nil {
+		dprScale, derr := img.GetDoubleDefault("imgproxy-dpr-scale", 1.0)
+		if derr != nil {
+			dprScale = 1.0
+		}
+
+		if err = applyWatermark(img, imagedata.Watermark, &po.Watermark, dprScale, framesCount); err != nil {
 			return err
 		}
 	}
@@ -204,9 +209,13 @@ func saveImageToFitBytes(ctx context.Context, po *options.ProcessingOptions, img
 	var diff float64
 	quality := po.GetQuality()
 
+	if err := img.CopyMemory(); err != nil {
+		return nil, err
+	}
+
 	for {
 		imgdata, err := img.Save(po.Format, quality)
-		if len(imgdata.Data) <= po.MaxBytes || quality <= 10 || err != nil {
+		if err != nil || len(imgdata.Data) <= po.MaxBytes || quality <= 10 {
 			return imgdata, err
 		}
 		imgdata.Close()
