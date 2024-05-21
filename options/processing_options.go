@@ -61,10 +61,6 @@ type WatermarkOptions struct {
 	Gravity   GravityOptions
 	Scale     float64
 	ImageURL  string
-	Enabled bool
-	Opacity float64
-	Gravity GravityOptions
-	Scale   float64
 }
 
 func (wo WatermarkOptions) ShouldReplicate() bool {
