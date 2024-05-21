@@ -17,6 +17,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/metrics"
 	"github.com/imgproxy/imgproxy/v3/reuseport"
 	"github.com/imgproxy/imgproxy/v3/router"
+	"github.com/imgproxy/imgproxy/v3/vips"
 )
 
 var (
@@ -29,14 +30,14 @@ func buildRouter() *router.Router {
 	r := router.New(config.PathPrefix)
 
 	r.GET("/", handleLanding, true)
-	r.GET("/health", handleHealth, true)
-	if len(config.HealthCheckPath) > 0 {
-		r.GET(config.HealthCheckPath, handleHealth, true)
-	}
-	r.GET("/favicon.ico", handleFavicon, true)
+	r.GET("", handleLanding, true)
+
 	r.GET("/", withMetrics(withPanicHandler(withCORS(withSecret(handleProcessing)))), false)
+
 	r.HEAD("/", withCORS(handleHead), false)
 	r.OPTIONS("/", withCORS(handleHead), false)
+
+	r.HealthHandler = handleHealth
 
 	return r
 }
@@ -131,6 +132,11 @@ func withSecret(h router.RouteHandler) router.RouteHandler {
 
 func withPanicHandler(h router.RouteHandler) router.RouteHandler {
 	return func(reqID string, rw http.ResponseWriter, r *http.Request) {
+		ctx := errorreport.StartRequest(r)
+		r = r.WithContext(ctx)
+
+		errorreport.SetMetadata(r, "Request ID", reqID)
+
 		defer func() {
 			if rerr := recover(); rerr != nil {
 				if rerr == http.ErrAbortHandler {
@@ -150,6 +156,7 @@ func withPanicHandler(h router.RouteHandler) router.RouteHandler {
 
 				router.LogResponse(reqID, r, ierr.StatusCode, ierr)
 
+				rw.Header().Set("Content-Type", "text/plain")
 				rw.WriteHeader(ierr.StatusCode)
 
 				if config.DevelopmentErrorsMode {
@@ -165,19 +172,37 @@ func withPanicHandler(h router.RouteHandler) router.RouteHandler {
 }
 
 func handleHealth(reqID string, rw http.ResponseWriter, r *http.Request) {
-	router.LogResponse(reqID, r, 200, nil)
+	var (
+		status int
+		msg    []byte
+		ierr   *ierrors.Error
+	)
+
+	if err := vips.Health(); err == nil {
+		status = http.StatusOK
+		msg = imgproxyIsRunningMsg
+	} else {
+		status = http.StatusInternalServerError
+		msg = []byte("Error")
+		ierr = ierrors.Wrap(err, 1)
+	}
+
+	if len(msg) == 0 {
+		msg = []byte{' '}
+	}
+
+	// Log response only if something went wrong
+	if ierr != nil {
+		router.LogResponse(reqID, r, status, ierr)
+	}
+
+	rw.Header().Set("Content-Type", "text/plain")
 	rw.Header().Set("Cache-Control", "no-cache")
-	rw.WriteHeader(200)
-	rw.Write(imgproxyIsRunningMsg)
+	rw.WriteHeader(status)
+	rw.Write(msg)
 }
 
 func handleHead(reqID string, rw http.ResponseWriter, r *http.Request) {
 	router.LogResponse(reqID, r, 200, nil)
-	rw.WriteHeader(200)
-}
-
-func handleFavicon(reqID string, rw http.ResponseWriter, r *http.Request) {
-	router.LogResponse(reqID, r, 200, nil)
-	// TODO: Add a real favicon maybe?
 	rw.WriteHeader(200)
 }

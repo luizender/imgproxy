@@ -18,7 +18,7 @@ func canScaleOnLoad(pctx *pipelineContext, imgdata *imagedata.ImageData, scale f
 		return false
 	}
 
-	if imgdata.Type == imagetype.SVG {
+	if imgdata.Type.IsVector() {
 		return true
 	}
 
@@ -32,9 +32,7 @@ func canScaleOnLoad(pctx *pipelineContext, imgdata *imagedata.ImageData, scale f
 		imgdata.Type == imagetype.AVIF
 }
 
-func calcJpegShink(scale float64, imgtype imagetype.Type) int {
-	shrink := int(1.0 / scale)
-
+func calcJpegShink(shrink float64) int {
 	switch {
 	case shrink >= 8:
 		return 8
@@ -48,7 +46,10 @@ func calcJpegShink(scale float64, imgtype imagetype.Type) int {
 }
 
 func scaleOnLoad(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	prescale := math.Max(pctx.wscale, pctx.hscale)
+	wshrink := float64(pctx.srcWidth) / float64(imath.Scale(pctx.srcWidth, pctx.wscale))
+	hshrink := float64(pctx.srcHeight) / float64(imath.Scale(pctx.srcHeight, pctx.hscale))
+	preshrink := math.Min(wshrink, hshrink)
+	prescale := 1.0 / preshrink
 
 	if !canScaleOnLoad(pctx, imgdata, prescale) {
 		return nil
@@ -76,7 +77,7 @@ func scaleOnLoad(pctx *pipelineContext, img *vips.Image, po *options.ProcessingO
 		pctx.angle = angle
 		pctx.flip = flip
 	} else {
-		jpegShrink := calcJpegShink(prescale, pctx.imgtype)
+		jpegShrink := calcJpegShink(preshrink)
 
 		if pctx.imgtype == imagetype.JPEG && jpegShrink == 1 {
 			return nil
@@ -103,6 +104,8 @@ func scaleOnLoad(pctx *pipelineContext, img *vips.Image, po *options.ProcessingO
 		pctx.hscale = 1.0
 	}
 
+	// We should crop before scaling, but we scaled the image on load,
+	// so we need to adjust crop options
 	if pctx.cropWidth > 0 {
 		pctx.cropWidth = imath.Max(1, imath.Shrink(pctx.cropWidth, wpreshrink))
 	}
@@ -110,8 +113,14 @@ func scaleOnLoad(pctx *pipelineContext, img *vips.Image, po *options.ProcessingO
 		pctx.cropHeight = imath.Max(1, imath.Shrink(pctx.cropHeight, hpreshrink))
 	}
 	if pctx.cropGravity.Type != options.GravityFocusPoint {
-		pctx.cropGravity.X /= wpreshrink
-		pctx.cropGravity.Y /= hpreshrink
+		// Adjust only when crop gravity offsets are absolute
+		if math.Abs(pctx.cropGravity.X) >= 1.0 {
+			// Round offsets to prevent turning absolute offsets to relative (ex: 1.0 => 0.5)
+			pctx.cropGravity.X = math.RoundToEven(pctx.cropGravity.X / wpreshrink)
+		}
+		if math.Abs(pctx.cropGravity.Y) >= 1.0 {
+			pctx.cropGravity.Y = math.RoundToEven(pctx.cropGravity.Y / hpreshrink)
+		}
 	}
 
 	return nil

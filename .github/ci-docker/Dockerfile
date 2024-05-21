@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim
+FROM ubuntu:mantic
 
 RUN apt-get -qq update \
   && apt-get install -y --no-install-recommends \
@@ -7,8 +7,11 @@ RUN apt-get -qq update \
     git \
     ca-certificates \
     build-essential \
-    ninja-build \
+    gobject-introspection \
+    libgirepository1.0-dev \
     python3-pip \
+    python3-venv \
+    libssl-dev \
     libglib2.0-dev \
     libxml2-dev \
     libjpeg-dev \
@@ -25,14 +28,27 @@ RUN apt-get -qq update \
     libopencv-imgproc-dev \
     libopencv-objdetect-dev \
     libopencv-dnn-dev \
-  && pip install --force meson \
+  && python3 -m venv /root/.python \
+  && /root/.python/bin/pip install meson ninja \
   && rm -rf /var/lib/apt/lists/*
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y \
+  && export PATH="/root/.cargo/bin:$PATH" \
+  && cargo install cargo-c \
+  && cd /root \
+  && git clone --depth 1 https://github.com/DarthSim/quantizr.git \
+  && cd quantizr \
+  && cargo cinstall --release --library-type=cdylib \
+  && rm -rf /root/.rustup /root/.cargo
+
+ENV PATH="/root/.python/bin:$PATH"
+ENV LD_LIBRARY_PATH="/usr/local/lib"
 
 RUN \
   mkdir /root/vips \
     && cd /root/vips \
     && curl -s -S -L -o vips_releases.json "https://api.github.com/repos/libvips/libvips/releases" \
-    && for VIPS_VERSION in "8.13" "8.14"; do \
+    && for VIPS_VERSION in "8.13" "8.14" "8.15"; do \
       mkdir $VIPS_VERSION \
       && export VIPS_RELEASE=$(grep -m 1 "\"tag_name\": \"v$VIPS_VERSION." vips_releases.json | sed -E 's/.*"v([^"]+)".*/\1/') \
       && echo "Building Vips $VIPS_RELEASE as $VIPS_VERSION" \
@@ -45,7 +61,6 @@ RUN \
         --prefix=/root/vips/$VIPS_VERSION \
         --libdir=lib \
         -Dgtk_doc=false \
-        -Dintrospection=false \
       && ninja -C _build \
       && ninja -C _build install \
       && cd .. \

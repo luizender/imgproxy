@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,14 @@ type WatermarkOptions struct {
 	Gravity   GravityOptions
 	Scale     float64
 	ImageURL  string
+	Enabled bool
+	Opacity float64
+	Gravity GravityOptions
+	Scale   float64
+}
+
+func (wo WatermarkOptions) ShouldReplicate() bool {
+	return wo.Gravity.Type == GravityReplicate
 }
 
 type ProcessingOptions struct {
@@ -140,7 +149,7 @@ func NewProcessingOptions() *ProcessingOptions {
 		Blur:              0,
 		Sharpen:           0,
 		Dpr:               1,
-		Watermark:         WatermarkOptions{Opacity: 1, Replicate: false, Gravity: GravityOptions{Type: GravityCenter}},
+		Watermark:         WatermarkOptions{Opacity: 1, Gravity: GravityOptions{Type: GravityCenter}},
 		StripMetadata:     config.StripMetadata,
 		KeepCopyright:     config.KeepCopyright,
 		StripColorProfile: config.StripColorProfile,
@@ -177,15 +186,6 @@ func (po *ProcessingOptions) GetQuality() int {
 	}
 
 	return q
-}
-
-func (po *ProcessingOptions) isPresetUsed(name string) bool {
-	for _, usedName := range po.UsedPresets {
-		if usedName == name {
-			return true
-		}
-	}
-	return false
 }
 
 func (po *ProcessingOptions) Diff() structdiff.Entries {
@@ -274,8 +274,8 @@ func parseExtend(opts *ExtendOptions, name string, args []string) error {
 			return err
 		}
 
-		if opts.Gravity.Type == GravitySmart {
-			return fmt.Errorf("%s doesn't support smart gravity", name)
+		if !opts.Gravity.Type.OkForExtend() {
+			return fmt.Errorf("%s doesn't support %s gravity", name, opts.Gravity.Type)
 		}
 	}
 
@@ -438,7 +438,15 @@ func applyDprOption(po *ProcessingOptions, args []string) error {
 }
 
 func applyGravityOption(po *ProcessingOptions, args []string) error {
-	return parseGravity(&po.Gravity, args)
+	if err := parseGravity(&po.Gravity, args); err != nil {
+		return err
+	}
+
+	if !po.Gravity.Type.OkForCrop() {
+		return fmt.Errorf("%s gravity type is not applicable to gravity", po.Gravity.Type)
+	}
+
+	return nil
 }
 
 func applyCropOption(po *ProcessingOptions, args []string) error {
@@ -461,7 +469,12 @@ func applyCropOption(po *ProcessingOptions, args []string) error {
 	}
 
 	if len(args) > 2 {
-		return parseGravity(&po.Crop.Gravity, args[2:])
+		if err := parseGravity(&po.Crop.Gravity, args[2:]); err != nil {
+			return err
+		}
+		if !po.Crop.Gravity.Type.OkForCrop() {
+			return fmt.Errorf("%s gravity type is not applicable to crop", po.Crop.Gravity.Type)
+		}
 	}
 
 	return nil
@@ -691,17 +704,17 @@ func applyPixelateOption(po *ProcessingOptions, args []string) error {
 	return nil
 }
 
-func applyPresetOption(po *ProcessingOptions, args []string) error {
+func applyPresetOption(po *ProcessingOptions, args []string, usedPresets ...string) error {
 	for _, preset := range args {
 		if p, ok := presets[preset]; ok {
-			if po.isPresetUsed(preset) {
+			if slices.Contains(usedPresets, preset) {
 				log.Warningf("Recursive preset usage is detected: %s", preset)
 				continue
 			}
 
 			po.UsedPresets = append(po.UsedPresets, preset)
 
-			if err := applyURLOptions(po, p); err != nil {
+			if err := applyURLOptions(po, p, append(usedPresets, preset)...); err != nil {
 				return err
 			}
 		} else {
@@ -725,9 +738,7 @@ func applyWatermarkOption(po *ProcessingOptions, args []string) error {
 	}
 
 	if len(args) > 1 && len(args[1]) > 0 {
-		if args[1] == "re" {
-			po.Watermark.Replicate = true
-		} else if g, ok := gravityTypes[args[1]]; ok && g != GravityFocusPoint && g != GravitySmart {
+		if g, ok := gravityTypes[args[1]]; ok && g.OkForWatermark() {
 			po.Watermark.Gravity.Type = g
 		} else {
 			return fmt.Errorf("Invalid watermark position: %s", args[1])
@@ -735,16 +746,16 @@ func applyWatermarkOption(po *ProcessingOptions, args []string) error {
 	}
 
 	if len(args) > 2 && len(args[2]) > 0 {
-		if x, err := strconv.Atoi(args[2]); err == nil {
-			po.Watermark.Gravity.X = float64(x)
+		if x, err := strconv.ParseFloat(args[2], 64); err == nil {
+			po.Watermark.Gravity.X = x
 		} else {
 			return fmt.Errorf("Invalid watermark X offset: %s", args[2])
 		}
 	}
 
 	if len(args) > 3 && len(args[3]) > 0 {
-		if y, err := strconv.Atoi(args[3]); err == nil {
-			po.Watermark.Gravity.Y = float64(y)
+		if y, err := strconv.ParseFloat(args[3], 64); err == nil {
+			po.Watermark.Gravity.Y = y
 		} else {
 			return fmt.Errorf("Invalid watermark Y offset: %s", args[3])
 		}
@@ -992,7 +1003,7 @@ func applyMaxAnimationFrameResolutionOption(po *ProcessingOptions, args []string
 	return nil
 }
 
-func applyURLOption(po *ProcessingOptions, name string, args []string) error {
+func applyURLOption(po *ProcessingOptions, name string, args []string, usedPresets ...string) error {
 	switch name {
 	case "resize", "rs":
 		return applyResizeOption(po, args)
@@ -1074,7 +1085,7 @@ func applyURLOption(po *ProcessingOptions, name string, args []string) error {
 		return applyReturnAttachmentOption(po, args)
 	// Presets
 	case "preset", "pr":
-		return applyPresetOption(po, args)
+		return applyPresetOption(po, args, usedPresets...)
 	// Security
 	case "max_src_resolution", "msr":
 		return applyMaxSrcResolutionOption(po, args)
@@ -1089,9 +1100,9 @@ func applyURLOption(po *ProcessingOptions, name string, args []string) error {
 	return fmt.Errorf("Unknown processing option: %s", name)
 }
 
-func applyURLOptions(po *ProcessingOptions, options urlOptions) error {
+func applyURLOptions(po *ProcessingOptions, options urlOptions, usedPresets ...string) error {
 	for _, opt := range options {
-		if err := applyURLOption(po, opt.Name, opt.Args); err != nil {
+		if err := applyURLOption(po, opt.Name, opt.Args, usedPresets...); err != nil {
 			return err
 		}
 	}

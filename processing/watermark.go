@@ -19,7 +19,6 @@ var watermarkPipeline = pipeline{
 	scale,
 	rotateAndFlip,
 	padding,
-	stripMetadata,
 }
 
 func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, imgWidth, imgHeight int, offsetScale float64, framesCount int) error {
@@ -38,17 +37,26 @@ func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options
 	po.Dpr = 1
 	po.Enlarge = true
 	po.Format = wmData.Type
-	po.StripMetadata = true
-	po.KeepCopyright = false
 
 	if opts.Scale > 0 {
 		po.Width = imath.Max(imath.ScaleToEven(imgWidth, opts.Scale), 1)
 		po.Height = imath.Max(imath.ScaleToEven(imgHeight, opts.Scale), 1)
 	}
 
-	if opts.Replicate {
-		offX := int(math.RoundToEven(opts.Gravity.X * offsetScale))
-		offY := int(math.RoundToEven(opts.Gravity.Y * offsetScale))
+	if opts.ShouldReplicate() {
+		var offX, offY int
+
+		if math.Abs(opts.Gravity.X) >= 1.0 {
+			offX = imath.RoundToEven(opts.Gravity.X * offsetScale)
+		} else {
+			offX = imath.ScaleToEven(imgWidth, opts.Gravity.X)
+		}
+
+		if math.Abs(opts.Gravity.Y) >= 1.0 {
+			offY = imath.RoundToEven(opts.Gravity.Y * offsetScale)
+		} else {
+			offY = imath.ScaleToEven(imgHeight, opts.Gravity.Y)
+		}
 
 		po.Padding.Enabled = true
 		po.Padding.Left = offX / 2
@@ -61,7 +69,7 @@ func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options
 		return err
 	}
 
-	if opts.Replicate || framesCount > 1 {
+	if opts.ShouldReplicate() || framesCount > 1 {
 		// We need to copy image if we're going to replicate.
 		// Replication requires image to be read several times, and this requires
 		// random access to pixels
@@ -70,22 +78,21 @@ func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options
 		}
 	}
 
-	if opts.Replicate {
-		if err := wm.Replicate(imgWidth, imgHeight); err != nil {
+	if opts.ShouldReplicate() {
+		if err := wm.Replicate(imgWidth, imgHeight, true); err != nil {
 			return err
 		}
 	}
 
-	wm.RemoveBitsPerSampleHeader()
+	// We don't want any headers to be copied from the watermark to the image
+	if err := wm.StripAll(); err != nil {
+		return err
+	}
 
 	return nil
 }
 
 func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, offsetScale float64, framesCount int) error {
-	if err := img.RgbColourspace(); err != nil {
-		return err
-	}
-
 	wm := new(vips.Image)
 	defer wm.Clear()
 
@@ -97,12 +104,22 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 		return err
 	}
 
+	if !img.ColourProfileImported() {
+		if err := img.ImportColourProfile(); err != nil {
+			return err
+		}
+	}
+
+	if err := img.RgbColourspace(); err != nil {
+		return err
+	}
+
 	opacity := opts.Opacity * config.WatermarkOpacity
 
 	// If we replicated the watermark and need to apply it to an animated image,
 	// it is faster to replicate the watermark to all the image and apply it single-pass
-	if opts.Replicate && framesCount > 1 {
-		if err := wm.Replicate(width, height); err != nil {
+	if opts.ShouldReplicate() && framesCount > 1 {
+		if err := wm.Replicate(width, height, false); err != nil {
 			return err
 		}
 
@@ -110,9 +127,40 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 	}
 
 	left, top := 0, 0
+	wmWidth := wm.Width()
+	wmHeight := wm.Height()
 
-	if !opts.Replicate {
-		left, top = calcPosition(width, frameHeight, wm.Width(), wm.Height(), &opts.Gravity, offsetScale, true)
+	if !opts.ShouldReplicate() {
+		left, top = calcPosition(width, frameHeight, wmWidth, wmHeight, &opts.Gravity, offsetScale, true)
+	}
+
+	if left >= width || top >= height || -left >= wmWidth || -top >= wmHeight {
+		// Watermark is completely outside the image
+		return nil
+	}
+
+	// if watermark is partially outside the image, it may partially be visible
+	// on the next frame. We need to crop it vertically.
+	// We don't care about horizontal overlap, as frames are stacked vertically
+	if framesCount > 1 {
+		cropTop := 0
+		cropHeight := wmHeight
+
+		if top < 0 {
+			cropTop = -top
+			cropHeight -= cropTop
+			top = 0
+		}
+
+		if top+cropHeight > frameHeight {
+			cropHeight = frameHeight - top
+		}
+
+		if cropTop > 0 || cropHeight < wmHeight {
+			if err := wm.Crop(0, cropTop, wmWidth, cropHeight); err != nil {
+				return err
+			}
+		}
 	}
 
 	for i := 0; i < framesCount; i++ {

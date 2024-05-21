@@ -1,17 +1,22 @@
 package router
 
 import (
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"regexp"
 	"strings"
 
 	nanoid "github.com/matoous/go-nanoid/v2"
-	log "github.com/sirupsen/logrus"
+
+	"github.com/imgproxy/imgproxy/v3/config"
+	"github.com/imgproxy/imgproxy/v3/ierrors"
 )
 
 const (
-	xRequestIDHeader = "X-Request-ID"
+	xRequestIDHeader          = "X-Request-ID"
+	xAmznRequestContextHeader = "x-amzn-request-context"
 )
 
 var (
@@ -28,8 +33,12 @@ type route struct {
 }
 
 type Router struct {
-	prefix string
-	Routes []*route
+	prefix       string
+	healthRoutes []string
+	faviconRoute string
+
+	Routes        []*route
+	HealthHandler RouteHandler
 }
 
 func (r *route) isMatch(req *http.Request) bool {
@@ -45,13 +54,25 @@ func (r *route) isMatch(req *http.Request) bool {
 }
 
 func New(prefix string) *Router {
+	healthRoutes := []string{prefix + "/health"}
+	if len(config.HealthCheckPath) > 0 {
+		healthRoutes = append(healthRoutes, prefix+config.HealthCheckPath)
+	}
+
 	return &Router{
-		prefix: prefix,
-		Routes: make([]*route, 0),
+		prefix:       prefix,
+		healthRoutes: healthRoutes,
+		faviconRoute: prefix + "/favicon.ico",
+		Routes:       make([]*route, 0),
 	}
 }
 
 func (r *Router) Add(method, prefix string, handler RouteHandler, exact bool) {
+	// Don't add routes with empty prefix
+	if len(r.prefix+prefix) == 0 {
+		return
+	}
+
 	r.Routes = append(
 		r.Routes,
 		&route{Method: method, Prefix: r.prefix + prefix, Handler: handler, Exact: exact},
@@ -77,11 +98,44 @@ func (r *Router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	reqID := req.Header.Get(xRequestIDHeader)
 
 	if len(reqID) == 0 || !requestIDRe.MatchString(reqID) {
+		if lambdaContextVal := req.Header.Get(xAmznRequestContextHeader); len(lambdaContextVal) > 0 {
+			var lambdaContext struct {
+				RequestID string `json:"requestId"`
+			}
+
+			err := json.Unmarshal([]byte(lambdaContextVal), &lambdaContext)
+			if err == nil && len(lambdaContext.RequestID) > 0 {
+				reqID = lambdaContext.RequestID
+			}
+		}
+	}
+
+	if len(reqID) == 0 || !requestIDRe.MatchString(reqID) {
 		reqID, _ = nanoid.New()
 	}
 
 	rw.Header().Set("Server", "imgproxy")
 	rw.Header().Set(xRequestIDHeader, reqID)
+
+	if req.Method == http.MethodGet {
+		if r.HealthHandler != nil {
+			for _, healthRoute := range r.healthRoutes {
+				if req.URL.Path == healthRoute {
+					r.HealthHandler(reqID, rw, req)
+					return
+				}
+			}
+		}
+
+		if req.URL.Path == r.faviconRoute {
+			// TODO: Add a real favicon maybe?
+			rw.Header().Set("Content-Type", "text/plain")
+			rw.WriteHeader(404)
+			// Write a single byte to make AWS Lambda happy
+			rw.Write([]byte{' '})
+			return
+		}
+	}
 
 	if ip := req.Header.Get("CF-Connecting-IP"); len(ip) != 0 {
 		replaceRemoteAddr(req, ip)
@@ -103,9 +157,11 @@ func (r *Router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	log.Warningf("Route for %s is not defined", req.URL.Path)
+	LogResponse(reqID, req, 404, ierrors.New(404, fmt.Sprintf("Route for %s is not defined", req.URL.Path), "Not found"))
 
+	rw.Header().Set("Content-Type", "text/plain")
 	rw.WriteHeader(404)
+	rw.Write([]byte{' '})
 }
 
 func replaceRemoteAddr(req *http.Request, ip string) {

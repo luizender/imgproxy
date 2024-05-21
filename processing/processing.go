@@ -35,6 +35,9 @@ var mainPipeline = pipeline{
 	fixSize,
 	flatten,
 	watermark,
+}
+
+var finalizePipeline = pipeline{
 	exportColorProfile,
 	stripMetadata,
 }
@@ -85,15 +88,6 @@ func ValidatePreferredFormats() error {
 	return nil
 }
 
-func canFitToBytes(imgtype imagetype.Type) bool {
-	switch imgtype {
-	case imagetype.JPEG, imagetype.WEBP, imagetype.AVIF, imagetype.TIFF:
-		return true
-	default:
-		return false
-	}
-}
-
 func getImageSize(img *vips.Image) (int, int) {
 	width, height, _, _ := extractMeta(img, 0, true)
 
@@ -111,21 +105,19 @@ func transformAnimated(ctx context.Context, img *vips.Image, po *options.Process
 	}
 
 	imgWidth := img.Width()
+	framesCount := imath.Min(img.Pages(), po.SecurityOptions.MaxAnimationFrames)
 
 	frameHeight, err := img.GetInt("page-height")
 	if err != nil {
 		return err
 	}
 
-	framesCount := imath.Min(img.Height()/frameHeight, po.SecurityOptions.MaxAnimationFrames)
-
 	// Double check dimensions because animated image has many frames
 	if err = security.CheckDimensions(imgWidth, frameHeight, framesCount, po.SecurityOptions); err != nil {
 		return err
 	}
 
-	// Vips 8.8+ supports n-pages and doesn't load the whole animated image on header access
-	if nPages, _ := img.GetIntDefault("n-pages", 1); nPages > framesCount {
+	if img.Pages() > framesCount {
 		// Load only the needed frames
 		if err = img.Load(imgdata, 1, 1.0, framesCount); err != nil {
 			return err
@@ -167,6 +159,16 @@ func transformAnimated(ctx context.Context, img *vips.Image, po *options.Process
 		if err = mainPipeline.Run(ctx, frame, po, nil); err != nil {
 			return err
 		}
+
+		if r, _ := frame.GetIntDefault("imgproxy-scaled-down", 0); r == 1 {
+			if err = frame.CopyMemory(); err != nil {
+				return err
+			}
+
+			if err = router.CheckTimeout(ctx); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err = img.Arrayjoin(frames); err != nil {
@@ -197,10 +199,11 @@ func transformAnimated(ctx context.Context, img *vips.Image, po *options.Process
 		delay = delay[:framesCount]
 	}
 
+	img.SetInt("imgproxy-is-animated", 1)
 	img.SetInt("page-height", frames[0].Height())
 	img.SetIntSlice("delay", delay)
 	img.SetInt("loop", loop)
-	img.SetInt("n-pages", framesCount)
+	img.SetInt("n-pages", img.Height()/frames[0].Height())
 
 	return nil
 }
@@ -315,6 +318,10 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 		}
 	}
 
+	if err := finalizePipeline.Run(ctx, img, po, imgdata); err != nil {
+		return nil, err
+	}
+
 	if po.Format == imagetype.AVIF && (img.Width() < 16 || img.Height() < 16) {
 		if img.HasAlpha() {
 			po.Format = imagetype.PNG
@@ -333,7 +340,7 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 		err     error
 	)
 
-	if po.MaxBytes > 0 && canFitToBytes(po.Format) {
+	if po.MaxBytes > 0 && po.Format.SupportsQuality() {
 		outData, err = saveImageToFitBytes(ctx, po, img)
 	} else {
 		outData, err = img.Save(po.Format, po.GetQuality())

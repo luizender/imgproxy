@@ -7,12 +7,15 @@ package vips
 */
 import "C"
 import (
+	"context"
 	"errors"
 	"math"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	log "github.com/sirupsen/logrus"
@@ -21,6 +24,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/ierrors"
 	"github.com/imgproxy/imgproxy/v3/imagedata"
 	"github.com/imgproxy/imgproxy/v3/imagetype"
+	"github.com/imgproxy/imgproxy/v3/imath"
 	"github.com/imgproxy/imgproxy/v3/metrics/cloudwatch"
 	"github.com/imgproxy/imgproxy/v3/metrics/datadog"
 	"github.com/imgproxy/imgproxy/v3/metrics/newrelic"
@@ -45,6 +49,15 @@ var vipsConf struct {
 	PngQuantize           C.int
 	PngQuantizationColors C.int
 	AvifSpeed             C.int
+	PngUnlimited          C.int
+	SvgUnlimited          C.int
+}
+
+var badImageErrRe = []*regexp.Regexp{
+	regexp.MustCompile(`^(\S+)load_buffer: `),
+	regexp.MustCompile(`^VipsJpeg: `),
+	regexp.MustCompile(`^tiff2vips: `),
+	regexp.MustCompile(`^webp2vips: `),
 }
 
 func Init() error {
@@ -61,9 +74,14 @@ func Init() error {
 	C.vips_cache_set_max_mem(0)
 	C.vips_cache_set_max(0)
 
-	C.vips_concurrency_set(1)
-
-	C.vips_vector_set_enabled(1)
+	if lambdaFn := os.Getenv("AWS_LAMBDA_FUNCTION_NAME"); len(lambdaFn) > 0 {
+		// Set vips concurrency level to GOMAXPROCS if we are running in AWS Lambda
+		// since each function processes only one request at a time
+		// so we can use all available CPU cores
+		C.vips_concurrency_set(C.int(imath.Max(1, runtime.GOMAXPROCS(0))))
+	} else {
+		C.vips_concurrency_set(1)
+	}
 
 	if len(os.Getenv("IMGPROXY_VIPS_LEAK_CHECK")) > 0 {
 		C.vips_leak_set(C.gboolean(1))
@@ -80,6 +98,8 @@ func Init() error {
 	vipsConf.PngQuantize = gbool(config.PngQuantize)
 	vipsConf.PngQuantizationColors = C.int(config.PngQuantizationColors)
 	vipsConf.AvifSpeed = C.int(config.AvifSpeed)
+	vipsConf.PngUnlimited = gbool(config.PngUnlimited)
+	vipsConf.SvgUnlimited = gbool(config.SvgUnlimited)
 
 	prometheus.AddGaugeFunc(
 		"vips_memory_bytes",
@@ -120,7 +140,7 @@ func Init() error {
 	otel.AddGaugeFunc(
 		"vips_allocs",
 		"A gauge of the number of active vips allocations.",
-		"By",
+		"1",
 		GetAllocs,
 	)
 
@@ -147,6 +167,35 @@ func GetAllocs() float64 {
 	return float64(C.vips_tracked_get_allocs())
 }
 
+func Health() error {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
+	done := make(chan struct{})
+
+	var err error
+
+	go func(done chan struct{}) {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		defer Cleanup()
+
+		if C.vips_health() != 0 {
+			err = Error()
+		}
+
+		close(done)
+	}(done)
+
+	select {
+	case <-done:
+		return err
+	case <-timer.C:
+		return context.DeadlineExceeded
+	}
+}
+
 func Cleanup() {
 	C.vips_cleanup()
 }
@@ -155,12 +204,17 @@ func Error() error {
 	defer C.vips_error_clear()
 
 	errstr := strings.TrimSpace(C.GoString(C.vips_error_buffer()))
+	err := ierrors.NewUnexpected(errstr, 1)
 
-	if strings.Contains(errstr, "load_buffer: ") {
-		return ierrors.New(422, errstr, "Broken or unsupported image")
+	for _, re := range badImageErrRe {
+		if re.MatchString(errstr) {
+			err.StatusCode = 422
+			err.PublicMessage = "Broken or unsupported image"
+			break
+		}
 	}
 
-	return ierrors.NewUnexpected(errstr, 1)
+	return err
 }
 
 func hasOperation(name string) bool {
@@ -214,7 +268,7 @@ func SupportsSave(it imagetype.Type) bool {
 		sup = hasOperation("webpsave_buffer")
 	case imagetype.GIF:
 		sup = hasOperation("gifsave_buffer")
-	case imagetype.AVIF:
+	case imagetype.HEIC, imagetype.AVIF:
 		sup = hasOperation("heifsave_buffer")
 	case imagetype.BMP:
 		sup = true
@@ -250,6 +304,14 @@ func (img *Image) Height() int {
 	return int(img.VipsImage.Ysize)
 }
 
+func (img *Image) Pages() int {
+	p, err := img.GetIntDefault("n-pages", 1)
+	if err != nil {
+		return 1
+	}
+	return p
+}
+
 func (img *Image) Load(imgdata *imagedata.ImageData, shrink int, scale float64, pages int) error {
 	if imgdata.Type == imagetype.ICO {
 		return img.loadIco(imgdata.Data, shrink, scale, pages)
@@ -269,13 +331,13 @@ func (img *Image) Load(imgdata *imagedata.ImageData, shrink int, scale float64, 
 	case imagetype.JPEG:
 		err = C.vips_jpegload_go(data, dataSize, C.int(shrink), &tmp)
 	case imagetype.PNG:
-		err = C.vips_pngload_go(data, dataSize, &tmp)
+		err = C.vips_pngload_go(data, dataSize, &tmp, vipsConf.PngUnlimited)
 	case imagetype.WEBP:
 		err = C.vips_webpload_go(data, dataSize, C.double(scale), C.int(pages), &tmp)
 	case imagetype.GIF:
 		err = C.vips_gifload_go(data, dataSize, C.int(pages), &tmp)
 	case imagetype.SVG:
-		err = C.vips_svgload_go(data, dataSize, C.double(scale), &tmp)
+		err = C.vips_svgload_go(data, dataSize, C.double(scale), &tmp, vipsConf.SvgUnlimited)
 	case imagetype.HEIC, imagetype.AVIF:
 		err = C.vips_heifload_go(data, dataSize, &tmp, C.int(0))
 	case imagetype.TIFF:
@@ -288,6 +350,14 @@ func (img *Image) Load(imgdata *imagedata.ImageData, shrink int, scale float64, 
 	}
 
 	C.swap_and_clear(&img.VipsImage, tmp)
+
+	if imgdata.Type == imagetype.TIFF {
+		if C.vips_fix_float_tiff(img.VipsImage, &tmp) == 0 {
+			C.swap_and_clear(&img.VipsImage, tmp)
+		} else {
+			log.Warnf("Can't fix TIFF: %s", Error())
+		}
+	}
 
 	return nil
 }
@@ -337,6 +407,8 @@ func (img *Image) Save(imgtype imagetype.Type, quality int) (*imagedata.ImageDat
 		err = C.vips_webpsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality))
 	case imagetype.GIF:
 		err = C.vips_gifsave_go(img.VipsImage, &ptr, &imgsize)
+	case imagetype.HEIC:
+		err = C.vips_heifsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality))
 	case imagetype.AVIF:
 		err = C.vips_avifsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality), vipsConf.AvifSpeed)
 	case imagetype.TIFF:
@@ -363,6 +435,17 @@ func (img *Image) Clear() {
 	if img.VipsImage != nil {
 		C.clear_image(&img.VipsImage)
 	}
+}
+
+func (img *Image) LineCache(lines int) error {
+	var tmp *C.VipsImage
+
+	if C.vips_linecache_seq(img.VipsImage, &tmp, C.int(lines)) != 0 {
+		return Error()
+	}
+
+	C.swap_and_clear(&img.VipsImage, tmp)
+	return nil
 }
 
 func (img *Image) Arrayjoin(in []*Image) error {
@@ -490,10 +573,6 @@ func (img *Image) SetBlob(name string, value []byte) {
 	C.vips_image_set_blob_copy(img.VipsImage, cachedCString(name), unsafe.Pointer(&value[0]), C.size_t(len(value)))
 }
 
-func (img *Image) RemoveBitsPerSampleHeader() {
-	C.vips_remove_bits_per_sample(img.VipsImage)
-}
-
 func (img *Image) CastUchar() error {
 	var tmp *C.VipsImage
 
@@ -525,6 +604,10 @@ func (img *Image) Resize(wscale, hscale float64) error {
 
 	if C.vips_resize_go(img.VipsImage, &tmp, C.double(wscale), C.double(hscale)) != 0 {
 		return Error()
+	}
+
+	if wscale < 1.0 || hscale < 1.0 {
+		C.vips_image_set_int(tmp, cachedCString("imgproxy-scaled-down"), 1)
 	}
 
 	C.swap_and_clear(&img.VipsImage, tmp)
@@ -653,7 +736,10 @@ func (img *Image) ImportColourProfile() error {
 		return nil
 	}
 
-	if C.vips_has_embedded_icc(img.VipsImage) == 0 {
+	// Don't import is there's no embedded profile or embedded profile is sRGB
+	if C.vips_has_embedded_icc(img.VipsImage) == 0 ||
+		(C.vips_image_guess_interpretation(img.VipsImage) == C.VIPS_INTERPRETATION_sRGB &&
+			C.vips_icc_is_srgb_iec61966(img.VipsImage) == 1) {
 		return nil
 	}
 
@@ -664,6 +750,11 @@ func (img *Image) ImportColourProfile() error {
 	}
 
 	return nil
+}
+
+func (img *Image) ColourProfileImported() bool {
+	imported, err := img.GetIntDefault("imgproxy-icc-imported", 0)
+	return imported > 0 && err == nil
 }
 
 func (img *Image) ExportColourProfile() error {
@@ -704,7 +795,9 @@ func (img *Image) TransformColourProfile() error {
 	var tmp *C.VipsImage
 
 	// Don't transform is there's no embedded profile or embedded profile is sRGB
-	if C.vips_has_embedded_icc(img.VipsImage) == 0 || C.vips_icc_is_srgb_iec61966(img.VipsImage) == 1 {
+	if C.vips_has_embedded_icc(img.VipsImage) == 0 ||
+		(C.vips_image_guess_interpretation(img.VipsImage) == C.VIPS_INTERPRETATION_sRGB &&
+			C.vips_icc_is_srgb_iec61966(img.VipsImage) == 1) {
 		return nil
 	}
 
@@ -759,10 +852,10 @@ func (img *Image) CopyMemory() error {
 	return nil
 }
 
-func (img *Image) Replicate(width, height int) error {
+func (img *Image) Replicate(width, height int, centered bool) error {
 	var tmp *C.VipsImage
 
-	if C.vips_replicate_go(img.VipsImage, &tmp, C.int(width), C.int(height)) != 0 {
+	if C.vips_replicate_go(img.VipsImage, &tmp, C.int(width), C.int(height), gbool(centered)) != 0 {
 		return Error()
 	}
 	C.swap_and_clear(&img.VipsImage, tmp)
@@ -796,6 +889,17 @@ func (img *Image) Strip(keepExifCopyright bool) error {
 	var tmp *C.VipsImage
 
 	if C.vips_strip(img.VipsImage, &tmp, gbool(keepExifCopyright)) != 0 {
+		return Error()
+	}
+	C.swap_and_clear(&img.VipsImage, tmp)
+
+	return nil
+}
+
+func (img *Image) StripAll() error {
+	var tmp *C.VipsImage
+
+	if C.vips_strip_all(img.VipsImage, &tmp) != 0 {
 		return Error()
 	}
 	C.swap_and_clear(&img.VipsImage, tmp)

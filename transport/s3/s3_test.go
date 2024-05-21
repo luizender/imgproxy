@@ -2,17 +2,17 @@ package s3
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/imgproxy/imgproxy/v3/config"
@@ -41,27 +41,30 @@ func (s *S3TestSuite) SetupSuite() {
 
 	var err error
 	s.transport, err = New()
-	require.Nil(s.T(), err)
+	s.Require().NoError(err)
 
-	svc := s.transport.(transport).svc
+	err = backend.CreateBucket("test")
+	s.Require().NoError(err)
 
-	_, err = svc.CreateBucket(&s3.CreateBucketInput{
-		Bucket: aws.String("test"),
-	})
-	require.Nil(s.T(), err)
+	svc, err := s.transport.(*transport).getClient(context.Background(), "test")
+	s.Require().NoError(err)
+	s.Require().NotNil(svc)
+	s.Require().IsType(&s3.Client{}, svc)
 
-	_, err = svc.PutObject(&s3.PutObjectInput{
+	client := svc.(*s3.Client)
+
+	_, err = client.PutObject(context.Background(), &s3.PutObjectInput{
 		Body:   bytes.NewReader(make([]byte, 32)),
 		Bucket: aws.String("test"),
 		Key:    aws.String("foo/test.png"),
 	})
-	require.Nil(s.T(), err)
+	s.Require().NoError(err)
 
-	obj, err := svc.GetObject(&s3.GetObjectInput{
+	obj, err := client.GetObject(context.Background(), &s3.GetObjectInput{
 		Bucket: aws.String("test"),
 		Key:    aws.String("foo/test.png"),
 	})
-	require.Nil(s.T(), err)
+	s.Require().NoError(err)
 	defer obj.Body.Close()
 
 	s.etag = *obj.ETag
@@ -70,6 +73,7 @@ func (s *S3TestSuite) SetupSuite() {
 
 func (s *S3TestSuite) TearDownSuite() {
 	s.server.Close()
+	config.Reset()
 }
 
 func (s *S3TestSuite) TestRoundTripWithETagDisabledReturns200() {
@@ -77,8 +81,8 @@ func (s *S3TestSuite) TestRoundTripWithETagDisabledReturns200() {
 	request, _ := http.NewRequest("GET", "s3://test/foo/test.png", nil)
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), 200, response.StatusCode)
+	s.Require().NoError(err)
+	s.Require().Equal(200, response.StatusCode)
 }
 
 func (s *S3TestSuite) TestRoundTripWithETagEnabled() {
@@ -86,9 +90,9 @@ func (s *S3TestSuite) TestRoundTripWithETagEnabled() {
 	request, _ := http.NewRequest("GET", "s3://test/foo/test.png", nil)
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), 200, response.StatusCode)
-	require.Equal(s.T(), s.etag, response.Header.Get("ETag"))
+	s.Require().NoError(err)
+	s.Require().Equal(200, response.StatusCode)
+	s.Require().Equal(s.etag, response.Header.Get("ETag"))
 }
 
 func (s *S3TestSuite) TestRoundTripWithIfNoneMatchReturns304() {
@@ -98,8 +102,8 @@ func (s *S3TestSuite) TestRoundTripWithIfNoneMatchReturns304() {
 	request.Header.Set("If-None-Match", s.etag)
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), http.StatusNotModified, response.StatusCode)
+	s.Require().NoError(err)
+	s.Require().Equal(http.StatusNotModified, response.StatusCode)
 }
 
 func (s *S3TestSuite) TestRoundTripWithUpdatedETagReturns200() {
@@ -109,8 +113,8 @@ func (s *S3TestSuite) TestRoundTripWithUpdatedETagReturns200() {
 	request.Header.Set("If-None-Match", s.etag+"_wrong")
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), http.StatusOK, response.StatusCode)
+	s.Require().NoError(err)
+	s.Require().Equal(http.StatusOK, response.StatusCode)
 }
 
 func (s *S3TestSuite) TestRoundTripWithLastModifiedDisabledReturns200() {
@@ -118,21 +122,20 @@ func (s *S3TestSuite) TestRoundTripWithLastModifiedDisabledReturns200() {
 	request, _ := http.NewRequest("GET", "s3://test/foo/test.png", nil)
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), 200, response.StatusCode)
+	s.Require().NoError(err)
+	s.Require().Equal(200, response.StatusCode)
 }
 
 func (s *S3TestSuite) TestRoundTripWithLastModifiedEnabled() {
-	config.ETagEnabled = true
+	config.LastModifiedEnabled = true
 	request, _ := http.NewRequest("GET", "s3://test/foo/test.png", nil)
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), 200, response.StatusCode)
-	require.Equal(s.T(), s.lastModified.Format(http.TimeFormat), response.Header.Get("Last-Modified"))
+	s.Require().NoError(err)
+	s.Require().Equal(200, response.StatusCode)
+	s.Require().Equal(s.lastModified.Format(http.TimeFormat), response.Header.Get("Last-Modified"))
 }
 
-// gofakes3 doesn't support If-Modified-Since (yet?)
 func (s *S3TestSuite) TestRoundTripWithIfModifiedSinceReturns304() {
 	config.LastModifiedEnabled = true
 
@@ -140,8 +143,8 @@ func (s *S3TestSuite) TestRoundTripWithIfModifiedSinceReturns304() {
 	request.Header.Set("If-Modified-Since", s.lastModified.Format(http.TimeFormat))
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), http.StatusNotModified, response.StatusCode)
+	s.Require().NoError(err)
+	s.Require().Equal(http.StatusNotModified, response.StatusCode)
 }
 
 func (s *S3TestSuite) TestRoundTripWithUpdatedLastModifiedReturns200() {
@@ -151,8 +154,17 @@ func (s *S3TestSuite) TestRoundTripWithUpdatedLastModifiedReturns200() {
 	request.Header.Set("If-Modified-Since", s.lastModified.Add(-24*time.Hour).Format(http.TimeFormat))
 
 	response, err := s.transport.RoundTrip(request)
-	require.Nil(s.T(), err)
-	require.Equal(s.T(), http.StatusOK, response.StatusCode)
+	s.Require().NoError(err)
+	s.Require().Equal(http.StatusOK, response.StatusCode)
+}
+
+func (s *S3TestSuite) TestRoundTripWithMultiregionEnabledReturns200() {
+	config.S3MultiRegion = true
+	request, _ := http.NewRequest("GET", "s3://test/foo/test.png", nil)
+
+	response, err := s.transport.RoundTrip(request)
+	s.Require().NoError(err)
+	s.Require().Equal(200, response.StatusCode)
 }
 
 func TestS3Transport(t *testing.T) {
