@@ -10,6 +10,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/imgproxy/imgproxy/v3/config"
 	"github.com/imgproxy/imgproxy/v3/cookies"
@@ -25,24 +26,23 @@ import (
 	"github.com/imgproxy/imgproxy/v3/processing"
 	"github.com/imgproxy/imgproxy/v3/router"
 	"github.com/imgproxy/imgproxy/v3/security"
-	"github.com/imgproxy/imgproxy/v3/semaphore"
 	"github.com/imgproxy/imgproxy/v3/svg"
 	"github.com/imgproxy/imgproxy/v3/vips"
 )
 
 var (
-	queueSem      *semaphore.Semaphore
-	processingSem *semaphore.Semaphore
+	queueSem      *semaphore.Weighted
+	processingSem *semaphore.Weighted
 
 	headerVaryValue string
 )
 
 func initProcessingHandler() {
 	if config.RequestsQueueSize > 0 {
-		queueSem = semaphore.New(config.RequestsQueueSize + config.Workers)
+		queueSem = semaphore.NewWeighted(int64(config.RequestsQueueSize + config.Workers))
 	}
 
-	processingSem = semaphore.New(config.Workers)
+	processingSem = semaphore.NewWeighted(int64(config.Workers))
 
 	vary := make([]string, 0)
 
@@ -143,10 +143,21 @@ func respondWithImage(reqID string, r *http.Request, rw http.ResponseWriter, sta
 
 	rw.Header().Set("Content-Length", strconv.Itoa(len(resultData.Data)))
 	rw.WriteHeader(statusCode)
-	rw.Write(resultData.Data)
+	_, err := rw.Write(resultData.Data)
+
+	var ierr *ierrors.Error
+	if err != nil {
+		ierr = ierrors.New(statusCode, fmt.Sprintf("Failed to write response: %s", err), "Failed to write response")
+		ierr.Unexpected = true
+
+		if config.ReportIOErrors {
+			sendErr(r.Context(), "IO", ierr)
+			errorreport.Report(ierr, r)
+		}
+	}
 
 	router.LogResponse(
-		reqID, r, statusCode, nil,
+		reqID, r, statusCode, ierr,
 		log.Fields{
 			"image_url":          originURL,
 			"processing_options": po,
@@ -204,14 +215,6 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	if queueSem != nil {
-		token, acquired := queueSem.TryAcquire()
-		if !acquired {
-			panic(ierrors.New(429, "Too many requests", "Too many requests"))
-		}
-		defer token.Release()
-	}
-
 	path := r.RequestURI
 	if queryStart := strings.IndexByte(path, '?'); queryStart >= 0 {
 		path = path[:queryStart]
@@ -244,6 +247,9 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 
 	errorreport.SetMetadata(r, "Source Image URL", imageURL)
 	errorreport.SetMetadata(r, "Processing Options", po)
+
+	metrics.SetMetadata(ctx, "imgproxy.source_image_url", imageURL)
+	metrics.SetMetadata(ctx, "imgproxy.processing_options", po)
 
 	err = security.VerifySourceURL(imageURL)
 	checkErr(ctx, "security", err)
@@ -282,21 +288,30 @@ func handleProcessing(reqID string, rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The heavy part start here, so we need to restrict worker number
-	var processingSemToken *semaphore.Token
+	if queueSem != nil {
+		acquired := queueSem.TryAcquire(1)
+		if !acquired {
+			panic(ierrors.New(429, "Too many requests", "Too many requests"))
+		}
+		defer queueSem.Release(1)
+	}
+
+	// The heavy part starts here, so we need to restrict worker number
 	func() {
 		defer metrics.StartQueueSegment(ctx)()
 
-		var acquired bool
-		processingSemToken, acquired = processingSem.Acquire(ctx)
-		if !acquired {
+		err = processingSem.Acquire(ctx, 1)
+		if err != nil {
 			// We don't actually need to check timeout here,
 			// but it's an easy way to check if this is an actual timeout
 			// or the request was canceled
 			checkErr(ctx, "queue", router.CheckTimeout(ctx))
+			// We should never reach this line as err could be only ctx.Err()
+			// and we've already checked for it. But beter safe than sorry
+			sendErrAndPanic(ctx, "queue", err)
 		}
 	}()
-	defer processingSemToken.Release()
+	defer processingSem.Release(1)
 
 	stats.IncImagesInProgress()
 	defer stats.DecImagesInProgress()

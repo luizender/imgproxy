@@ -41,9 +41,9 @@ func String(s *string, name string) {
 	}
 }
 
-func StringSlice(s *[]string, name string) {
+func StringSliceSep(s *[]string, name, sep string) {
 	if env := os.Getenv(name); len(env) > 0 {
-		parts := strings.Split(env, ",")
+		parts := strings.Split(env, sep)
 
 		for i, p := range parts {
 			parts[i] = strings.TrimSpace(p)
@@ -57,6 +57,10 @@ func StringSlice(s *[]string, name string) {
 	*s = []string{}
 }
 
+func StringSlice(s *[]string, name string) {
+	StringSliceSep(s, name, ",")
+}
+
 func StringSliceFile(s *[]string, filepath string) error {
 	if len(filepath) == 0 {
 		return nil
@@ -66,6 +70,7 @@ func StringSliceFile(s *[]string, filepath string) error {
 	if err != nil {
 		return fmt.Errorf("Can't open file %s\n", filepath)
 	}
+	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
