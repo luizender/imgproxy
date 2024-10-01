@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,10 +35,9 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
-	"go.opentelemetry.io/otel/semconv/v1.17.0/httpconv"
+	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
+	"go.opentelemetry.io/otel/semconv/v1.20.0/httpconv"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/imgproxy/imgproxy/v3/config"
@@ -236,13 +236,8 @@ func mapDeprecatedConfig() {
 }
 
 func buildGRPCExporters() (*otlptrace.Exporter, sdkmetric.Exporter, error) {
-	tracerOpts := []otlptracegrpc.Option{
-		otlptracegrpc.WithDialOption(grpc.WithBlock()),
-	}
-
-	meterOpts := []otlpmetricgrpc.Option{
-		otlpmetricgrpc.WithDialOption(grpc.WithBlock()),
-	}
+	tracerOpts := []otlptracegrpc.Option{}
+	meterOpts := []otlpmetricgrpc.Option{}
 
 	if tlsConf, err := buildTLSConfig(); tlsConf != nil && err == nil {
 		creds := credentials.NewTLS(tlsConf)
@@ -402,10 +397,16 @@ func StartRootSpan(ctx context.Context, rw http.ResponseWriter, r *http.Request)
 		ctx = propagator.Extract(ctx, propagation.HeaderCarrier(r.Header))
 	}
 
+	server := r.Host
+	if len(server) == 0 {
+		server = "imgproxy"
+	}
+
 	ctx, span := tracer.Start(
 		ctx, "/request",
 		trace.WithSpanKind(trace.SpanKindServer),
-		trace.WithAttributes(httpconv.ServerRequest("imgproxy", r)...),
+		trace.WithAttributes(httpconv.ServerRequest(server, r)...),
+		trace.WithAttributes(semconv.HTTPURL(r.RequestURI)),
 	)
 	ctx = context.WithValue(ctx, hasSpanCtxKey{}, struct{}{})
 
@@ -422,6 +423,33 @@ func StartRootSpan(ctx context.Context, rw http.ResponseWriter, r *http.Request)
 
 	cancel := func() { span.End() }
 	return ctx, cancel, newRw
+}
+
+func SetMetadata(ctx context.Context, key string, value interface{}) {
+	if !enabled {
+		return
+	}
+
+	span := trace.SpanFromContext(ctx)
+
+	rv := reflect.ValueOf(value)
+
+	switch {
+	case rv.Kind() == reflect.String:
+		span.SetAttributes(attribute.String(key, value.(string)))
+	case rv.Kind() == reflect.Bool:
+		span.SetAttributes(attribute.Bool(key, value.(bool)))
+	case rv.CanInt():
+		span.SetAttributes(attribute.Int64(key, rv.Int()))
+	case rv.CanUint():
+		span.SetAttributes(attribute.Int64(key, int64(rv.Uint())))
+	case rv.CanFloat():
+		span.SetAttributes(attribute.Float64(key, rv.Float()))
+	default:
+		// Theoretically, we can also cover slices and arrays here,
+		// but it's pretty complex and not really needed for now
+		span.SetAttributes(attribute.String(key, fmt.Sprintf("%v", value)))
+	}
 }
 
 func StartSpan(ctx context.Context, name string) context.CancelFunc {

@@ -24,6 +24,7 @@ import (
 
 	"github.com/imgproxy/imgproxy/v3/config"
 	defaultTransport "github.com/imgproxy/imgproxy/v3/transport"
+	"github.com/imgproxy/imgproxy/v3/transport/common"
 )
 
 type s3Client interface {
@@ -66,7 +67,11 @@ func New() (http.RoundTripper, error) {
 	}
 
 	if len(config.S3AssumeRoleArn) != 0 {
-		creds := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(conf), config.S3AssumeRoleArn)
+		creds := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(conf), config.S3AssumeRoleArn, func(o *stscreds.AssumeRoleOptions) {
+			if len(config.S3AssumeRoleExternalID) != 0 {
+				o.ExternalID = aws.String(config.S3AssumeRoleExternalID)
+			}
+		})
 		conf.Credentials = creds
 	}
 
@@ -79,7 +84,7 @@ func New() (http.RoundTripper, error) {
 		}
 		clientOptions = append(clientOptions, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
-			o.UsePathStyle = true
+			o.UsePathStyle = config.S3EndpointUsePathStyle
 		})
 	}
 
@@ -98,8 +103,7 @@ func New() (http.RoundTripper, error) {
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	bucket := req.URL.Host
-	key := strings.TrimLeft(req.URL.Path, "/")
+	bucket, key := common.GetBucketAndKey(req.URL)
 
 	if len(bucket) == 0 || len(key) == 0 {
 		body := strings.NewReader("Invalid S3 URL: bucket name or object key is empty")
@@ -187,8 +191,8 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if output.CacheControl != nil {
 		header.Set("Cache-Control", *output.CacheControl)
 	}
-	if output.Expires != nil {
-		header.Set("Expires", output.Expires.Format(http.TimeFormat))
+	if output.ExpiresString != nil {
+		header.Set("Expires", *output.ExpiresString)
 	}
 	if output.ETag != nil {
 		header.Set("ETag", *output.ETag)

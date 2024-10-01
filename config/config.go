@@ -21,8 +21,9 @@ type URLReplacement = configurators.URLReplacement
 var (
 	Network                string
 	Bind                   string
-	ReadTimeout            int
-	WriteTimeout           int
+	Timeout                int
+	ReadRequestTimeout     int
+	WriteResponseTimeout   int
 	KeepAliveTimeout       int
 	ClientKeepAliveTimeout int
 	DownloadTimeout        int
@@ -106,7 +107,9 @@ var (
 	S3Enabled                 bool
 	S3Region                  string
 	S3Endpoint                string
+	S3EndpointUsePathStyle    bool
 	S3AssumeRoleArn           string
+	S3AssumeRoleExternalID    string
 	S3MultiRegion             bool
 	S3DecryptionClientEnabled bool
 
@@ -182,11 +185,12 @@ var (
 	SentryEnvironment string
 	SentryRelease     string
 
-	AirbrakeProjecID  int
-	AirbrakeProjecKey string
-	AirbrakeEnv       string
+	AirbrakeProjectID  int
+	AirbrakeProjectKey string
+	AirbrakeEnv        string
 
 	ReportDownloadingErrors bool
+	ReportIOErrors          bool
 
 	EnableDebugHeaders bool
 
@@ -195,6 +199,8 @@ var (
 	BufferPoolCalibrationThreshold int
 
 	HealthCheckPath string
+
+	ArgumentsSeparator string
 )
 
 var (
@@ -214,8 +220,9 @@ func init() {
 func Reset() {
 	Network = "tcp"
 	Bind = ":8080"
-	ReadTimeout = 10
-	WriteTimeout = 10
+	Timeout = 10
+	ReadRequestTimeout = 10
+	WriteResponseTimeout = 10
 	KeepAliveTimeout = 10
 	ClientKeepAliveTimeout = 90
 	DownloadTimeout = 5
@@ -302,7 +309,9 @@ func Reset() {
 	S3Enabled = false
 	S3Region = ""
 	S3Endpoint = ""
+	S3EndpointUsePathStyle = true
 	S3AssumeRoleArn = ""
+	S3AssumeRoleExternalID = ""
 	S3MultiRegion = false
 	S3DecryptionClientEnabled = false
 	GCSEnabled = false
@@ -373,11 +382,12 @@ func Reset() {
 	SentryEnvironment = "production"
 	SentryRelease = fmt.Sprintf("imgproxy@%s", version.Version)
 
-	AirbrakeProjecID = 0
-	AirbrakeProjecKey = ""
+	AirbrakeProjectID = 0
+	AirbrakeProjectKey = ""
 	AirbrakeEnv = "production"
 
 	ReportDownloadingErrors = true
+	ReportIOErrors = false
 
 	EnableDebugHeaders = false
 
@@ -386,6 +396,8 @@ func Reset() {
 	BufferPoolCalibrationThreshold = 1024
 
 	HealthCheckPath = ""
+
+	ArgumentsSeparator = ":"
 }
 
 func Configure() error {
@@ -397,10 +409,24 @@ func Configure() error {
 
 	configurators.String(&Network, "IMGPROXY_NETWORK")
 	configurators.String(&Bind, "IMGPROXY_BIND")
-	configurators.Int(&ReadTimeout, "IMGPROXY_READ_TIMEOUT")
-	configurators.Int(&WriteTimeout, "IMGPROXY_WRITE_TIMEOUT")
+
+	if _, ok := os.LookupEnv("IMGPROXY_WRITE_TIMEOUT"); ok {
+		log.Warning("IMGPROXY_WRITE_TIMEOUT is deprecated, use IMGPROXY_TIMEOUT instead")
+		configurators.Int(&Timeout, "IMGPROXY_WRITE_TIMEOUT")
+	}
+	configurators.Int(&Timeout, "IMGPROXY_TIMEOUT")
+
+	if _, ok := os.LookupEnv("IMGPROXY_READ_TIMEOUT"); ok {
+		log.Warning("IMGPROXY_READ_TIMEOUT is deprecated, use IMGPROXY_READ_REQUEST_TIMEOUT instead")
+		configurators.Int(&ReadRequestTimeout, "IMGPROXY_READ_TIMEOUT")
+	}
+	configurators.Int(&ReadRequestTimeout, "IMGPROXY_READ_REQUEST_TIMEOUT")
+
+	configurators.Int(&WriteResponseTimeout, "IMGPROXY_WRITE_RESPONSE_TIMEOUT")
+
 	configurators.Int(&KeepAliveTimeout, "IMGPROXY_KEEP_ALIVE_TIMEOUT")
 	configurators.Int(&ClientKeepAliveTimeout, "IMGPROXY_CLIENT_KEEP_ALIVE_TIMEOUT")
+
 	configurators.Int(&DownloadTimeout, "IMGPROXY_DOWNLOAD_TIMEOUT")
 
 	if lambdaFn := os.Getenv("AWS_LAMBDA_FUNCTION_NAME"); len(lambdaFn) > 0 {
@@ -469,6 +495,8 @@ func Configure() error {
 
 	configurators.URLPath(&HealthCheckPath, "IMGPROXY_HEALTH_CHECK_PATH")
 
+	configurators.String(&ArgumentsSeparator, "IMGPROXY_ARGUMENTS_SEPARATOR")
+
 	if err := configurators.ImageTypes(&PreferredFormats, "IMGPROXY_PREFERRED_FORMATS"); err != nil {
 		return err
 	}
@@ -513,7 +541,9 @@ func Configure() error {
 	configurators.Bool(&S3Enabled, "IMGPROXY_USE_S3")
 	configurators.String(&S3Region, "IMGPROXY_S3_REGION")
 	configurators.String(&S3Endpoint, "IMGPROXY_S3_ENDPOINT")
+	configurators.Bool(&S3EndpointUsePathStyle, "IMGPROXY_S3_ENDPOINT_USE_PATH_STYLE")
 	configurators.String(&S3AssumeRoleArn, "IMGPROXY_S3_ASSUME_ROLE_ARN")
+	configurators.String(&S3AssumeRoleExternalID, "IMGPROXY_S3_ASSUME_ROLE_EXTERNAL_ID")
 	configurators.Bool(&S3MultiRegion, "IMGPROXY_S3_MULTI_REGION")
 	configurators.Bool(&S3DecryptionClientEnabled, "IMGPROXY_S3_USE_DECRYPTION_CLIENT")
 
@@ -545,7 +575,9 @@ func Configure() error {
 		return err
 	}
 
-	configurators.StringSlice(&Presets, "IMGPROXY_PRESETS")
+	presetsSep := ","
+	configurators.String(&presetsSep, "IMGPROXY_PRESETS_SEPARATOR")
+	configurators.StringSliceSep(&Presets, "IMGPROXY_PRESETS", presetsSep)
 	if err := configurators.StringSliceFile(&Presets, presetsPath); err != nil {
 		return err
 	}
@@ -590,10 +622,11 @@ func Configure() error {
 	configurators.String(&SentryDSN, "IMGPROXY_SENTRY_DSN")
 	configurators.String(&SentryEnvironment, "IMGPROXY_SENTRY_ENVIRONMENT")
 	configurators.String(&SentryRelease, "IMGPROXY_SENTRY_RELEASE")
-	configurators.Int(&AirbrakeProjecID, "IMGPROXY_AIRBRAKE_PROJECT_ID")
-	configurators.String(&AirbrakeProjecKey, "IMGPROXY_AIRBRAKE_PROJECT_KEY")
+	configurators.Int(&AirbrakeProjectID, "IMGPROXY_AIRBRAKE_PROJECT_ID")
+	configurators.String(&AirbrakeProjectKey, "IMGPROXY_AIRBRAKE_PROJECT_KEY")
 	configurators.String(&AirbrakeEnv, "IMGPROXY_AIRBRAKE_ENVIRONMENT")
 	configurators.Bool(&ReportDownloadingErrors, "IMGPROXY_REPORT_DOWNLOADING_ERRORS")
+	configurators.Bool(&ReportIOErrors, "IMGPROXY_REPORT_IO_ERRORS")
 	configurators.Bool(&EnableDebugHeaders, "IMGPROXY_ENABLE_DEBUG_HEADERS")
 
 	configurators.Int(&FreeMemoryInterval, "IMGPROXY_FREE_MEMORY_INTERVAL")
@@ -618,12 +651,14 @@ func Configure() error {
 		return errors.New("Bind address is not defined")
 	}
 
-	if ReadTimeout <= 0 {
-		return fmt.Errorf("Read timeout should be greater than 0, now - %d\n", ReadTimeout)
+	if Timeout <= 0 {
+		return fmt.Errorf("Timeout should be greater than 0, now - %d\n", Timeout)
 	}
-
-	if WriteTimeout <= 0 {
-		return fmt.Errorf("Write timeout should be greater than 0, now - %d\n", WriteTimeout)
+	if ReadRequestTimeout <= 0 {
+		return fmt.Errorf("Read request timeout should be greater than 0, now - %d\n", ReadRequestTimeout)
+	}
+	if WriteResponseTimeout <= 0 {
+		return fmt.Errorf("Write response timeout should be greater than 0, now - %d\n", WriteResponseTimeout)
 	}
 	if KeepAliveTimeout < 0 {
 		return fmt.Errorf("KeepAlive timeout should be greater than or equal to 0, now - %d\n", KeepAliveTimeout)
@@ -720,7 +755,7 @@ func Configure() error {
 		return fmt.Errorf("Fallback image TTL should be greater than or equal to 0, now - %d\n", TTL)
 	}
 
-	if FallbackImageHTTPCode < 100 || FallbackImageHTTPCode > 599 {
+	if FallbackImageHTTPCode != 0 && (FallbackImageHTTPCode < 100 || FallbackImageHTTPCode > 599) {
 		return errors.New("Fallback image HTTP code should be between 100 and 599")
 	}
 

@@ -1,15 +1,57 @@
 # Changelog
 
-## [Unreleased]
+## [3.26.0] - 2024-09-16
+# Add
+- Add `imgproxy.source_image_url` and `imgproxy.processing_options` attributes to New Relic, DataDog, and OpenTelemetry traces.
+- Add [IMGPROXY_S3_ENDPOINT_USE_PATH_STYLE](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_S3_ENDPOINT_USE_PATH_STYLE) config.
+- (pro) Add [monochrome](https://docs.imgproxy.net/latest/usage/processing#monochrome) processing option.
+- (pro) Add [duotone](https://docs.imgproxy.net/latest/usage/processing#duotone) processing option.
+- (pro) Add `objw` [gravity](https://docs.imgproxy.net/latest/usage/processing#gravity) type.
+- (pro) Add an object pseudo-class `all` that can be used with the `obj` and `objw` [gravity](https://docs.imgproxy.net/latest/usage/processing#gravity) types to match all detected objects.
+- (pro) Add [IMGPROXY_SMART_CROP_ADVANCED_MODE](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_SMART_CROP_ADVANCED_MODE) config.
+- (pro) Add [IMGPROXY_OBJECT_DETECTION_FALLBACK_TO_SMART_CROP](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_OBJECT_DETECTION_FALLBACK_TO_SMART_CROP) config.
+- (docker) Add a script for [building Linux packages](https://docs.imgproxy.net/latest/installation#building-linux-packages).
+
+# Change
+- Properly set the `net.host.name` and `http.url` tags in OpenTelemetry traces.
+- (pro) Object detection: [class names file](https://docs.imgproxy.net/latest/object_detection#class-names-file) can contain object classes' weights.
+
+# Fix
+- Fix handling `#` symbols in `local://`, `s3://`, `gcs://`, `abs://`, and `swift://` URLs.
+- Fix `IMGPROXY_FALLBACK_IMAGE_HTTP_CODE` value check. Allow `0` value.
+- (docker) Fix loading HEIC images made with iOS 18.
+
+## [3.25.0] - 2024-07-08
+### Add
+- Add [IMGPROXY_S3_ASSUME_ROLE_EXTERNAL_ID](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_S3_ASSUME_ROLE_EXTERNAL_ID) config.
+- Add [IMGPROXY_WRITE_RESPONSE_TIMEOUT](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_WRITE_RESPONSE_TIMEOUT) config.
+- Add [IMGPROXY_REPORT_IO_ERRORS](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_REPORT_IO_ERRORS) config.
+- Add [IMGPROXY_ARGUMENTS_SEPARATOR](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_ARGUMENTS_SEPARATOR) config.
+- Add [IMGPROXY_PRESETS_SEPARATOR](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_PRESETS_SEPARATOR) config.
+- (pro) Add support for object detection models in ONNX format.
+- (pro) Add [colorize](https://docs.imgproxy.net/latest/usage/processing#colorize) processing option.
+- (pro) Add [IMGPROXY_WATERMARK_PREPROCESS_URL](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_WATERMARK_PREPROCESS_URL) config.
+- (pro) Add [IMGPROXY_FALLBACK_IMAGE_PREPROCESS_URL](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_FALLBACK_IMAGE_PREPROCESS_URL) config.
+
 ### Changed
 - Automatically add `http://` scheme to the `IMGPROXY_S3_ENDPOINT` value if it has no scheme.
-- Trim redundant slashes in the S3 object key.
+- Trim redundant slashes in the S3, GCS, ABS, and Swift object keys.
+- Rename `IMGPROXY_WRITE_TIMEOUT` to `IMGPROXY_TIMEOUT`. The old name is deprecated but still supported.
+- Rename `IMGPROXY_READ_TIMEOUT` to `IMGPROXY_READ_REQUEST_TIMEOUT`. The old name is deprecated but still supported.
 - (pro) Allow specifying [gradient](https://docs.imgproxy.net/latest/usage/processing#gradient) direction as an angle in degrees.
+- (pro) Speed up ML features.
+- (pro) Update the face detection model.
 
 ### Fix
 - Fix HEIC/AVIF dimension limit handling.
 - Fix SVG detection when the root element has a namespace.
+- Fix treating percent-encoded symbols in `local://`, `s3://`, `gcs://`, `abs://`, and `swift://` URLs.
 - (pro) Fix style injection to SVG.
+- (pro) Fix video tiles generation when the video's SAR is not `1`.
+
+### Deprecated
+- `IMGPROXY_WRITE_TIMEOUT` config is deprecated. Use `IMGPROXY_TIMEOUT` instead.
+- `IMGPROXY_READ_TIMEOUT` config is deprecated. Use `IMGPROXY_READ_REQUEST_TIMEOUT` instead.
 
 ## [3.24.1] - 2024-04-30
 ### Fix
