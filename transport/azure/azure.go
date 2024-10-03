@@ -1,7 +1,6 @@
 package azure
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,9 +23,9 @@ import (
 )
 
 type transport struct {
-	client *azblob.Client
+	client                 *azblob.Client
 	defaultAzureCredential *azidentity.DefaultAzureCredential
-	opts *azblob.ClientOptions
+	opts                   *azblob.ClientOptions
 }
 
 func New() (http.RoundTripper, error) {
@@ -34,13 +33,9 @@ func New() (http.RoundTripper, error) {
 		client                 *azblob.Client
 		sharedKeyCredential    *azblob.SharedKeyCredential
 		defaultAzureCredential *azidentity.DefaultAzureCredential
-		endpointURL *url.URL
+		endpointURL            *url.URL
 		err                    error
 	)
-
-	// if len(config.ABSName) == 0 {
-	// 	return nil, errors.New("IMGPROXY_ABS_NAME must be set")
-	// }
 
 	endpoint := config.ABSEndpoint
 	if len(endpoint) == 0 && len(config.ABSName) > 0 {
@@ -74,7 +69,7 @@ func New() (http.RoundTripper, error) {
 		if endpointURL != nil {
 			client, err = azblob.NewClientWithSharedKeyCredential(endpointURL.String(), sharedKeyCredential, &opts)
 		}
-	} else{
+	} else {
 		defaultAzureCredential, err = azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
 			return nil, err
@@ -89,7 +84,7 @@ func New() (http.RoundTripper, error) {
 		return nil, err
 	}
 
-	if (endpointURL != nil && defaultAzureCredential == nil) {
+	if endpointURL != nil && defaultAzureCredential == nil {
 		defaultAzureCredential, err = azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
 			return nil, err
@@ -117,14 +112,17 @@ func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}, nil
 	}
 
-	var client *azblob.Client
-	if t.client != nil {
-		client = t.client
-	} else if strings.Contains(container, ".blob.core.windows.net") {
-		endpointURL, err := url.Parse(fmt.Sprintf("https://%s", container))
+	var err error
+	var endpointURL *url.URL
+	if strings.Contains(container, ".blob.core.windows.net") {
+		endpointURL, err = url.Parse(fmt.Sprintf("https://%s", container))
 		if err != nil {
 			return httprange.InvalidHTTPRangeResponse(req), err
 		}
+	}
+
+	var client *azblob.Client
+	if endpointURL != nil && (t.client == nil || endpointURL.String() != t.client.URL()) {
 		client, err = azblob.NewClient(endpointURL.String(), t.defaultAzureCredential, t.opts)
 		if err != nil {
 			return httprange.InvalidHTTPRangeResponse(req), err
@@ -134,8 +132,21 @@ func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			container = parts[0]
 			key = parts[1]
 		} else {
-			return httprange.InvalidHTTPRangeResponse(req), errors.New("Invalid ABS URL: unable to split container and key")
+			body := strings.NewReader("Invalid ABS URL: unable to split container and key")
+			return &http.Response{
+				StatusCode:    http.StatusNotFound,
+				Proto:         "HTTP/1.0",
+				ProtoMajor:    1,
+				ProtoMinor:    0,
+				Header:        http.Header{},
+				ContentLength: int64(body.Len()),
+				Body:          io.NopCloser(body),
+				Close:         false,
+				Request:       req,
+			}, nil
 		}
+	} else {
+		client = t.client
 	}
 
 	if client == nil {
