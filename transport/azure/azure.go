@@ -25,6 +25,8 @@ import (
 
 type transport struct {
 	client *azblob.Client
+	defaultAzureCredential *azidentity.DefaultAzureCredential
+	opts *azblob.ClientOptions
 }
 
 func New() (http.RoundTripper, error) {
@@ -32,21 +34,24 @@ func New() (http.RoundTripper, error) {
 		client                 *azblob.Client
 		sharedKeyCredential    *azblob.SharedKeyCredential
 		defaultAzureCredential *azidentity.DefaultAzureCredential
+		endpointURL *url.URL
 		err                    error
 	)
 
-	if len(config.ABSName) == 0 {
-		return nil, errors.New("IMGPROXY_ABS_NAME must be set")
-	}
+	// if len(config.ABSName) == 0 {
+	// 	return nil, errors.New("IMGPROXY_ABS_NAME must be set")
+	// }
 
 	endpoint := config.ABSEndpoint
-	if len(endpoint) == 0 {
+	if len(endpoint) == 0 && len(config.ABSName) > 0 {
 		endpoint = fmt.Sprintf("https://%s.blob.core.windows.net", config.ABSName)
 	}
 
-	endpointURL, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, err
+	if len(endpoint) > 0 {
+		endpointURL, err = url.Parse(endpoint)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	trans, err := defaultTransport.New(false)
@@ -66,21 +71,32 @@ func New() (http.RoundTripper, error) {
 			return nil, err
 		}
 
-		client, err = azblob.NewClientWithSharedKeyCredential(endpointURL.String(), sharedKeyCredential, &opts)
-	} else {
+		if endpointURL != nil {
+			client, err = azblob.NewClientWithSharedKeyCredential(endpointURL.String(), sharedKeyCredential, &opts)
+		}
+	} else{
 		defaultAzureCredential, err = azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
 			return nil, err
 		}
 
-		client, err = azblob.NewClient(endpointURL.String(), defaultAzureCredential, &opts)
+		if endpointURL != nil {
+			client, err = azblob.NewClient(endpointURL.String(), defaultAzureCredential, &opts)
+		}
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	return transport{client}, nil
+	if (endpointURL != nil && defaultAzureCredential == nil) {
+		defaultAzureCredential, err = azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return transport{client, defaultAzureCredential, &opts}, nil
 }
 
 func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -88,6 +104,42 @@ func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	if len(container) == 0 || len(key) == 0 {
 		body := strings.NewReader("Invalid ABS URL: container name or object key is empty")
+		return &http.Response{
+			StatusCode:    http.StatusNotFound,
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Header:        http.Header{},
+			ContentLength: int64(body.Len()),
+			Body:          io.NopCloser(body),
+			Close:         false,
+			Request:       req,
+		}, nil
+	}
+
+	var client *azblob.Client
+	if t.client != nil {
+		client = t.client
+	} else if strings.Contains(container, ".blob.core.windows.net") {
+		endpointURL, err := url.Parse(fmt.Sprintf("https://%s", container))
+		if err != nil {
+			return httprange.InvalidHTTPRangeResponse(req), err
+		}
+		client, err = azblob.NewClient(endpointURL.String(), t.defaultAzureCredential, t.opts)
+		if err != nil {
+			return httprange.InvalidHTTPRangeResponse(req), err
+		}
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) == 2 {
+			container = parts[0]
+			key = parts[1]
+		} else {
+			return httprange.InvalidHTTPRangeResponse(req), errors.New("Invalid ABS URL: unable to split container and key")
+		}
+	}
+
+	if client == nil {
+		body := strings.NewReader("Invalid ABS URL: no endpoint provided and no default client")
 		return &http.Response{
 			StatusCode:    http.StatusNotFound,
 			Proto:         "HTTP/1.0",
@@ -127,7 +179,7 @@ func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		statusCode = http.StatusPartialContent
 	}
 
-	result, err := t.client.DownloadStream(req.Context(), container, key, opts)
+	result, err := client.DownloadStream(req.Context(), container, key, opts)
 	if err != nil {
 		if azError, ok := err.(*azcore.ResponseError); !ok || azError.StatusCode < 100 || azError.StatusCode == 301 {
 			return nil, err
