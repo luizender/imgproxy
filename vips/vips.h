@@ -16,6 +16,7 @@ int gif_resolution_limit();
 int vips_health();
 
 int vips_jpegload_go(void *buf, size_t len, int shrink, VipsImage **out);
+int vips_jxlload_go(void *buf, size_t len, int pages, VipsImage **out);
 int vips_pngload_go(void *buf, size_t len, VipsImage **out, int unlimited);
 int vips_webpload_go(void *buf, size_t len, double scale, int pages, VipsImage **out);
 int vips_gifload_go(void *buf, size_t len, int pages, VipsImage **out);
@@ -47,6 +48,8 @@ int vips_resize_go(VipsImage *in, VipsImage **out, double wscale, double hscale)
 
 int vips_icc_is_srgb_iec61966(VipsImage *in);
 int vips_has_embedded_icc(VipsImage *in);
+int vips_icc_backup(VipsImage *in, VipsImage **out);
+int vips_icc_restore(VipsImage *in, VipsImage **out);
 int vips_icc_import_go(VipsImage *in, VipsImage **out);
 int vips_icc_export_go(VipsImage *in, VipsImage **out);
 int vips_icc_export_srgb(VipsImage *in, VipsImage **out);
@@ -81,6 +84,7 @@ int vips_strip(VipsImage *in, VipsImage **out, int keep_exif_copyright);
 int vips_strip_all(VipsImage *in, VipsImage **out);
 
 int vips_jpegsave_go(VipsImage *in, void **buf, size_t *len, int quality, int interlace);
+int vips_jxlsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort);
 int vips_pngsave_go(VipsImage *in, void **buf, size_t *len, int interlace, int quantize,
     int colors);
 int vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality);

@@ -3,7 +3,6 @@ package s3
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,19 +16,18 @@ import (
 	awsHttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	s3Manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/imgproxy/imgproxy/v3/config"
+	"github.com/imgproxy/imgproxy/v3/ierrors"
 	defaultTransport "github.com/imgproxy/imgproxy/v3/transport"
 	"github.com/imgproxy/imgproxy/v3/transport/common"
 )
 
 type s3Client interface {
 	GetObject(ctx context.Context, input *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error)
-	HeadBucket(ctx context.Context, input *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 }
 
 // transport implements RoundTripper for the 's3' protocol.
@@ -48,7 +46,7 @@ type transport struct {
 func New() (http.RoundTripper, error) {
 	conf, err := awsConfig.LoadDefaultConfig(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("can't load AWS S3 config: %s", err)
+		return nil, ierrors.Wrap(err, 0, ierrors.WithPrefix("can't load AWS S3 config"))
 	}
 
 	trans, err := defaultTransport.New(false)
@@ -90,7 +88,7 @@ func New() (http.RoundTripper, error) {
 
 	client, err := createClient(conf, clientOptions)
 	if err != nil {
-		return nil, fmt.Errorf("can't create S3 client: %s", err)
+		return nil, ierrors.Wrap(err, 0, ierrors.WithPrefix("can't create S3 client"))
 	}
 
 	return &transport{
@@ -103,7 +101,7 @@ func New() (http.RoundTripper, error) {
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	bucket, key := common.GetBucketAndKey(req.URL)
+	bucket, key, query := common.GetBucketAndKey(req.URL)
 
 	if len(bucket) == 0 || len(key) == 0 {
 		body := strings.NewReader("Invalid S3 URL: bucket name or object key is empty")
@@ -112,7 +110,7 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			Proto:         "HTTP/1.0",
 			ProtoMajor:    1,
 			ProtoMinor:    0,
-			Header:        http.Header{},
+			Header:        http.Header{"Content-Type": {"text/plain"}},
 			ContentLength: int64(body.Len()),
 			Body:          io.NopCloser(body),
 			Close:         false,
@@ -125,8 +123,8 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		Key:    aws.String(key),
 	}
 
-	if len(req.URL.RawQuery) > 0 {
-		input.VersionId = aws.String(req.URL.RawQuery)
+	if len(query) > 0 {
+		input.VersionId = aws.String(query)
 	}
 
 	statusCode := http.StatusOK
@@ -149,17 +147,30 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	client, err := t.getClient(req.Context(), *input.Bucket)
-	if err != nil {
-		return handleError(req, err)
-	}
+	client := t.getBucketClient(bucket)
 
 	output, err := client.GetObject(req.Context(), input)
-	if err != nil {
-		if output != nil && output.Body != nil {
+
+	defer func() {
+		if err != nil && output != nil && output.Body != nil {
 			output.Body.Close()
 		}
+	}()
 
+	if err != nil {
+		// Check if the error is the region mismatch error.
+		// If so, create a new client with the correct region and retry the request.
+		if region := regionFromError(err); len(region) != 0 {
+			client, err = t.createBucketClient(bucket, region)
+			if err != nil {
+				return handleError(req, err)
+			}
+
+			output, err = client.GetObject(req.Context(), input)
+		}
+	}
+
+	if err != nil {
 		return handleError(req, err)
 	}
 
@@ -221,11 +232,7 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func (t *transport) getClient(ctx context.Context, bucket string) (s3Client, error) {
-	if !config.S3MultiRegion {
-		return t.defaultClient, nil
-	}
-
+func (t *transport) getBucketClient(bucket string) s3Client {
 	var client s3Client
 
 	func() {
@@ -235,27 +242,22 @@ func (t *transport) getClient(ctx context.Context, bucket string) (s3Client, err
 	}()
 
 	if client != nil {
-		return client, nil
+		return client
 	}
 
+	return t.defaultClient
+}
+
+func (t *transport) createBucketClient(bucket, region string) (s3Client, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Check again if someone did this before us
-	if client = t.clientsByBucket[bucket]; client != nil {
+	if client := t.clientsByBucket[bucket]; client != nil {
 		return client, nil
 	}
 
-	region, err := s3Manager.GetBucketRegion(ctx, t.defaultClient, bucket)
-	if err != nil {
-		return nil, fmt.Errorf("can't get bucket region: %s", err)
-	}
-
-	if len(region) == 0 {
-		region = t.defaultConfig.Region
-	}
-
-	if client = t.clientsByRegion[region]; client != nil {
+	if client := t.clientsByRegion[region]; client != nil {
 		t.clientsByBucket[bucket] = client
 		return client, nil
 	}
@@ -263,9 +265,9 @@ func (t *transport) getClient(ctx context.Context, bucket string) (s3Client, err
 	conf := t.defaultConfig.Copy()
 	conf.Region = region
 
-	client, err = createClient(conf, t.clientOptions)
+	client, err := createClient(conf, t.clientOptions)
 	if err != nil {
-		return nil, fmt.Errorf("can't create regional S3 client: %s", err)
+		return nil, ierrors.Wrap(err, 0, ierrors.WithPrefix("can't create regional S3 client"))
 	}
 
 	t.clientsByRegion[region] = client
@@ -292,26 +294,37 @@ func createClient(conf aws.Config, opts []func(*s3.Options)) (s3Client, error) {
 	}
 }
 
+func regionFromError(err error) string {
+	var rerr *awsHttp.ResponseError
+	if !errors.As(err, &rerr) {
+		return ""
+	}
+
+	if rerr.Response == nil || rerr.Response.StatusCode != 301 {
+		return ""
+	}
+
+	return rerr.Response.Header.Get("X-Amz-Bucket-Region")
+}
+
 func handleError(req *http.Request, err error) (*http.Response, error) {
 	var rerr *awsHttp.ResponseError
 	if !errors.As(err, &rerr) {
-		return nil, err
+		return nil, ierrors.Wrap(err, 0)
 	}
 
 	if rerr.Response == nil || rerr.Response.StatusCode < 100 || rerr.Response.StatusCode == 301 {
-		return nil, err
+		return nil, ierrors.Wrap(err, 0)
 	}
-
-	body := strings.NewReader(err.Error())
 
 	return &http.Response{
 		StatusCode:    rerr.Response.StatusCode,
 		Proto:         "HTTP/1.0",
 		ProtoMajor:    1,
 		ProtoMinor:    0,
-		Header:        http.Header{},
-		ContentLength: int64(body.Len()),
-		Body:          io.NopCloser(body),
+		Header:        http.Header{"Content-Type": {"text/plain"}},
+		ContentLength: int64(len(err.Error())),
+		Body:          io.NopCloser(strings.NewReader(err.Error())),
 		Close:         false,
 		Request:       req,
 	}, nil

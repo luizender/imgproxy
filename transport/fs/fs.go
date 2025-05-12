@@ -30,7 +30,7 @@ func New() transport {
 func (t transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	header := make(http.Header)
 
-	_, path := common.GetBucketAndKey(req.URL)
+	_, path, _ := common.GetBucketAndKey(req.URL)
 	path = "/" + path
 
 	f, err := t.fs.Open(path)
@@ -122,7 +122,7 @@ func respNotFound(req *http.Request, msg string) *http.Response {
 		Proto:         "HTTP/1.0",
 		ProtoMajor:    1,
 		ProtoMinor:    0,
-		Header:        make(http.Header),
+		Header:        http.Header{"Content-Type": {"text/plain"}},
 		ContentLength: int64(len(msg)),
 		Body:          io.NopCloser(strings.NewReader(msg)),
 		Close:         false,

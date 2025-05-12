@@ -2,7 +2,6 @@ package options
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -27,15 +26,19 @@ func preprocessURL(u string) string {
 func decodeBase64URL(parts []string) (string, string, error) {
 	var format string
 
+	if len(parts) > 1 && config.Base64URLIncludesFilename {
+		parts = parts[:len(parts)-1]
+	}
+
 	encoded := strings.Join(parts, "")
 	urlParts := strings.Split(encoded, ".")
 
 	if len(urlParts[0]) == 0 {
-		return "", "", errors.New("Image URL is empty")
+		return "", "", newInvalidURLError("Image URL is empty")
 	}
 
 	if len(urlParts) > 2 {
-		return "", "", fmt.Errorf("Multiple formats are specified: %s", encoded)
+		return "", "", newInvalidURLError("Multiple formats are specified: %s", encoded)
 	}
 
 	if len(urlParts) == 2 && len(urlParts[1]) > 0 {
@@ -44,7 +47,7 @@ func decodeBase64URL(parts []string) (string, string, error) {
 
 	imageURL, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(urlParts[0], "="))
 	if err != nil {
-		return "", "", fmt.Errorf("Invalid url encoding: %s", encoded)
+		return "", "", newInvalidURLError("Invalid url encoding: %s", encoded)
 	}
 
 	return preprocessURL(string(imageURL)), format, nil
@@ -57,11 +60,11 @@ func decodePlainURL(parts []string) (string, string, error) {
 	urlParts := strings.Split(encoded, "@")
 
 	if len(urlParts[0]) == 0 {
-		return "", "", errors.New("Image URL is empty")
+		return "", "", newInvalidURLError("Image URL is empty")
 	}
 
 	if len(urlParts) > 2 {
-		return "", "", fmt.Errorf("Multiple formats are specified: %s", encoded)
+		return "", "", newInvalidURLError("Multiple formats are specified: %s", encoded)
 	}
 
 	if len(urlParts) == 2 && len(urlParts[1]) > 0 {
@@ -70,7 +73,7 @@ func decodePlainURL(parts []string) (string, string, error) {
 
 	unescaped, err := url.PathUnescape(urlParts[0])
 	if err != nil {
-		return "", "", fmt.Errorf("Invalid url encoding: %s", encoded)
+		return "", "", newInvalidURLError("Invalid url encoding: %s", encoded)
 	}
 
 	return preprocessURL(unescaped), format, nil
@@ -78,7 +81,7 @@ func decodePlainURL(parts []string) (string, string, error) {
 
 func DecodeURL(parts []string) (string, string, error) {
 	if len(parts) == 0 {
-		return "", "", errors.New("Image URL is empty")
+		return "", "", newInvalidURLError("Image URL is empty")
 	}
 
 	if parts[0] == urlTokenPlain && len(parts) > 1 {

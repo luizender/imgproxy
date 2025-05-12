@@ -3,11 +3,11 @@ package imagedata
 import (
 	"compress/gzip"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +17,7 @@ import (
 
 	defaultTransport "github.com/imgproxy/imgproxy/v3/transport"
 	azureTransport "github.com/imgproxy/imgproxy/v3/transport/azure"
+	transportCommon "github.com/imgproxy/imgproxy/v3/transport/common"
 	fsTransport "github.com/imgproxy/imgproxy/v3/transport/fs"
 	gcsTransport "github.com/imgproxy/imgproxy/v3/transport/gcs"
 	s3Transport "github.com/imgproxy/imgproxy/v3/transport/s3"
@@ -38,6 +39,8 @@ var (
 		"Last-Modified",
 	}
 
+	contentRangeRe = regexp.MustCompile(`^bytes ((\d+)-(\d+)|\*)/(\d+|\*)$`)
+
 	// For tests
 	redirectAllRequestsTo string
 )
@@ -46,16 +49,7 @@ const msgSourceImageIsUnreachable = "Source image is unreachable"
 
 type DownloadOptions struct {
 	Header    http.Header
-	CookieJar *cookiejar.Jar
-}
-
-type ErrorNotModified struct {
-	Message string
-	Headers map[string]string
-}
-
-func (e *ErrorNotModified) Error() string {
-	return e.Message
+	CookieJar http.CookieJar
 }
 
 func initDownloading() error {
@@ -110,7 +104,7 @@ func initDownloading() error {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			redirects := len(via)
 			if redirects >= config.MaxRedirects {
-				return fmt.Errorf("stopped after %d redirects", redirects)
+				return newImageTooManyRedirectsError(redirects)
 			}
 			return nil
 		},
@@ -131,33 +125,20 @@ func headersToStore(res *http.Response) map[string]string {
 	return m
 }
 
-func BuildImageRequest(ctx context.Context, imageURL string, header http.Header, jar *cookiejar.Jar) (*http.Request, context.CancelFunc, error) {
+func BuildImageRequest(ctx context.Context, imageURL string, header http.Header, jar http.CookieJar) (*http.Request, context.CancelFunc, error) {
 	reqCtx, reqCancel := context.WithTimeout(ctx, time.Duration(config.DownloadTimeout)*time.Second)
+
+	imageURL = transportCommon.EscapeURL(imageURL)
 
 	req, err := http.NewRequestWithContext(reqCtx, "GET", imageURL, nil)
 	if err != nil {
 		reqCancel()
-		return nil, func() {}, ierrors.New(404, err.Error(), msgSourceImageIsUnreachable)
-	}
-
-	// S3, GCS, etc object keys may contain `#` symbol.
-	// `url.ParseRequestURI` unlike `url.Parse` does not cut-off the fragment part from the URL path.
-	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-		u, err := url.ParseRequestURI(imageURL)
-		if err != nil {
-			reqCancel()
-			return nil, func() {}, ierrors.New(404, err.Error(), msgSourceImageIsUnreachable)
-		}
-		req.URL = u
+		return nil, func() {}, newImageRequestError(err)
 	}
 
 	if _, ok := enabledSchemes[req.URL.Scheme]; !ok {
 		reqCancel()
-		return nil, func() {}, ierrors.New(
-			404,
-			fmt.Sprintf("Unknown scheme: %s", req.URL.Scheme),
-			msgSourceImageIsUnreachable,
-		)
+		return nil, func() {}, newImageRequstSchemeError(req.URL.Scheme)
 	}
 
 	if jar != nil {
@@ -178,8 +159,22 @@ func BuildImageRequest(ctx context.Context, imageURL string, header http.Header,
 }
 
 func SendRequest(req *http.Request) (*http.Response, error) {
+	var client *http.Client
+	if req.URL.Scheme == "http" || req.URL.Scheme == "https" {
+		clientCopy := *downloadClient
+
+		jar, err := cookiejar.New(nil)
+		if err != nil {
+			return nil, err
+		}
+		clientCopy.Jar = jar
+		client = &clientCopy
+	} else {
+		client = downloadClient
+	}
+
 	for {
-		res, err := downloadClient.Do(req)
+		res, err := client.Do(req)
 		if err == nil {
 			return res, nil
 		}
@@ -217,21 +212,51 @@ func requestImage(ctx context.Context, imageURL string, opts DownloadOptions) (*
 	if res.StatusCode == http.StatusNotModified {
 		res.Body.Close()
 		reqCancel()
-		return nil, func() {}, &ErrorNotModified{Message: "Not Modified", Headers: headersToStore(res)}
+		return nil, func() {}, newNotModifiedError(headersToStore(res))
 	}
 
-	if res.StatusCode != 200 {
-		body, _ := io.ReadAll(res.Body)
+	// If the source responds with 206, check if the response contains entire image.
+	// If not, return an error.
+	if res.StatusCode == http.StatusPartialContent {
+		contentRange := res.Header.Get("Content-Range")
+		rangeParts := contentRangeRe.FindStringSubmatch(contentRange)
+		if len(rangeParts) == 0 {
+			res.Body.Close()
+			reqCancel()
+			return nil, func() {}, newImagePartialResponseError("Partial response with invalid Content-Range header")
+		}
+
+		if rangeParts[1] == "*" || rangeParts[2] != "0" {
+			res.Body.Close()
+			reqCancel()
+			return nil, func() {}, newImagePartialResponseError("Partial response with incomplete content")
+		}
+
+		contentLengthStr := rangeParts[4]
+		if contentLengthStr == "*" {
+			contentLengthStr = res.Header.Get("Content-Length")
+		}
+
+		contentLength, _ := strconv.Atoi(contentLengthStr)
+		rangeEnd, _ := strconv.Atoi(rangeParts[3])
+
+		if contentLength <= 0 || rangeEnd != contentLength-1 {
+			res.Body.Close()
+			reqCancel()
+			return nil, func() {}, newImagePartialResponseError("Partial response with incomplete content")
+		}
+	} else if res.StatusCode != http.StatusOK {
+		var body string
+
+		if strings.HasPrefix(res.Header.Get("Content-Type"), "text/") {
+			bbody, _ := io.ReadAll(io.LimitReader(res.Body, 1024))
+			body = string(bbody)
+		}
+
 		res.Body.Close()
 		reqCancel()
 
-		status := 404
-		if res.StatusCode >= 500 {
-			status = 500
-		}
-
-		msg := fmt.Sprintf("Status: %d; %s", res.StatusCode, string(body))
-		return nil, func() {}, ierrors.New(status, msg, msgSourceImageIsUnreachable)
+		return nil, func() {}, newImageResponseStatusError(res.StatusCode, body)
 	}
 
 	return res, reqCancel, nil

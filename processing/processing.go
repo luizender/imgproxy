@@ -3,7 +3,6 @@ package processing
 import (
 	"context"
 	"errors"
-	"fmt"
 	"runtime"
 	"strconv"
 
@@ -54,7 +53,7 @@ func isImageTypePreferred(imgtype imagetype.Type) bool {
 
 func findBestFormat(srcType imagetype.Type, animated, expectAlpha bool) imagetype.Type {
 	for _, t := range config.PreferredFormats {
-		if animated && !t.SupportsAnimation() {
+		if animated && !t.SupportsAnimationSave() {
 			continue
 		}
 
@@ -248,8 +247,8 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 
 	animationSupport :=
 		po.SecurityOptions.MaxAnimationFrames > 1 &&
-			imgdata.Type.SupportsAnimation() &&
-			(po.Format == imagetype.Unknown || po.Format.SupportsAnimation())
+			imgdata.Type.SupportsAnimationLoad() &&
+			(po.Format == imagetype.Unknown || po.Format.SupportsAnimationSave())
 
 	pages := 1
 	if animationSupport {
@@ -281,6 +280,8 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 	switch {
 	case po.Format == imagetype.Unknown:
 		switch {
+		case po.PreferJxl && !animated:
+			po.Format = imagetype.JXL
 		case po.PreferAvif && !animated:
 			po.Format = imagetype.AVIF
 		case po.PreferWebP:
@@ -290,6 +291,8 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 		default:
 			po.Format = findBestFormat(imgdata.Type, animated, expectAlpha)
 		}
+	case po.EnforceJxl && !animated:
+		po.Format = imagetype.JXL
 	case po.EnforceAvif && !animated:
 		po.Format = imagetype.AVIF
 	case po.EnforceWebP:
@@ -297,10 +300,10 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 	}
 
 	if !vips.SupportsSave(po.Format) {
-		return nil, fmt.Errorf("Can't save %s, probably not supported by your libvips", po.Format)
+		return nil, newSaveFormatError(po.Format)
 	}
 
-	if po.Format.SupportsAnimation() && animated {
+	if po.Format.SupportsAnimationSave() && animated {
 		if err := transformAnimated(ctx, img, po, imgdata); err != nil {
 			return nil, err
 		}
