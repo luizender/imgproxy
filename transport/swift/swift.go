@@ -3,7 +3,6 @@ package swift
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/ncw/swift/v2"
 
 	"github.com/imgproxy/imgproxy/v3/config"
+	"github.com/imgproxy/imgproxy/v3/ierrors"
 	defaultTransport "github.com/imgproxy/imgproxy/v3/transport"
 	"github.com/imgproxy/imgproxy/v3/transport/common"
 	"github.com/imgproxy/imgproxy/v3/transport/notmodified"
@@ -44,14 +44,14 @@ func New() (http.RoundTripper, error) {
 	err = c.Authenticate(ctx)
 
 	if err != nil {
-		return nil, fmt.Errorf("swift authentication error: %s", err)
+		return nil, ierrors.Wrap(err, 0, ierrors.WithPrefix("swift authentication error"))
 	}
 
 	return transport{con: c}, nil
 }
 
 func (t transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	container, objectName := common.GetBucketAndKey(req.URL)
+	container, objectName, _ := common.GetBucketAndKey(req.URL)
 
 	if len(container) == 0 || len(objectName) == 0 {
 		body := strings.NewReader("Invalid Swift URL: container name or object name is empty")
@@ -60,7 +60,7 @@ func (t transport) RoundTrip(req *http.Request) (resp *http.Response, err error)
 			Proto:         "HTTP/1.0",
 			ProtoMajor:    1,
 			ProtoMinor:    0,
-			Header:        http.Header{},
+			Header:        http.Header{"Content-Type": {"text/plain"}},
 			ContentLength: int64(body.Len()),
 			Body:          io.NopCloser(body),
 			Close:         false,
@@ -80,18 +80,19 @@ func (t transport) RoundTrip(req *http.Request) (resp *http.Response, err error)
 	if err != nil {
 		if errors.Is(err, swift.ObjectNotFound) || errors.Is(err, swift.ContainerNotFound) {
 			return &http.Response{
-				StatusCode: http.StatusNotFound,
-				Proto:      "HTTP/1.0",
-				ProtoMajor: 1,
-				ProtoMinor: 0,
-				Header:     header,
-				Body:       io.NopCloser(strings.NewReader(err.Error())),
-				Close:      false,
-				Request:    req,
+				StatusCode:    http.StatusNotFound,
+				Proto:         "HTTP/1.0",
+				ProtoMajor:    1,
+				ProtoMinor:    0,
+				Header:        http.Header{"Content-Type": {"text/plain"}},
+				ContentLength: int64(len(err.Error())),
+				Body:          io.NopCloser(strings.NewReader(err.Error())),
+				Close:         false,
+				Request:       req,
 			}, nil
 		}
 
-		return nil, fmt.Errorf("error opening object: %v", err)
+		return nil, ierrors.Wrap(err, 0, ierrors.WithPrefix("error opening object"))
 	}
 
 	if config.ETagEnabled {

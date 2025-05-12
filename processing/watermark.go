@@ -46,16 +46,16 @@ func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options
 	if opts.ShouldReplicate() {
 		var offX, offY int
 
-		if math.Abs(opts.Gravity.X) >= 1.0 {
-			offX = imath.RoundToEven(opts.Gravity.X * offsetScale)
+		if math.Abs(opts.Position.X) >= 1.0 {
+			offX = imath.RoundToEven(opts.Position.X * offsetScale)
 		} else {
-			offX = imath.ScaleToEven(imgWidth, opts.Gravity.X)
+			offX = imath.ScaleToEven(imgWidth, opts.Position.X)
 		}
 
-		if math.Abs(opts.Gravity.Y) >= 1.0 {
-			offY = imath.RoundToEven(opts.Gravity.Y * offsetScale)
+		if math.Abs(opts.Position.Y) >= 1.0 {
+			offY = imath.RoundToEven(opts.Position.Y * offsetScale)
 		} else {
-			offY = imath.ScaleToEven(imgHeight, opts.Gravity.Y)
+			offY = imath.ScaleToEven(imgHeight, opts.Position.Y)
 		}
 
 		po.Padding.Enabled = true
@@ -85,11 +85,7 @@ func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options
 	}
 
 	// We don't want any headers to be copied from the watermark to the image
-	if err := wm.StripAll(); err != nil {
-		return err
-	}
-
-	return nil
+	return wm.StripAll()
 }
 
 func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, offsetScale float64, framesCount int) error {
@@ -131,7 +127,7 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 	wmHeight := wm.Height()
 
 	if !opts.ShouldReplicate() {
-		left, top = calcPosition(width, frameHeight, wmWidth, wmHeight, &opts.Gravity, offsetScale, true)
+		left, top = calcPosition(width, frameHeight, wmWidth, wmHeight, &opts.Position, offsetScale, true)
 	}
 
 	if left >= width || top >= height || -left >= wmWidth || -top >= wmHeight {

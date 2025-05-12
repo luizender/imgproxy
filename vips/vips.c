@@ -6,6 +6,8 @@
 
 #define VIPS_META_PALETTE_BITS_DEPTH "palette-bit-depth"
 
+#define IMGPROXY_META_ICC_NAME "imgproxy-icc-profile"
+
 int
 vips_initialize()
 {
@@ -61,6 +63,12 @@ vips_jpegload_go(void *buf, size_t len, int shrink, VipsImage **out)
         NULL);
 
   return vips_jpegload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, NULL);
+}
+
+int
+vips_jxlload_go(void *buf, size_t len, int pages, VipsImage **out)
+{
+  return vips_jxlload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, "n", pages, NULL);
 }
 
 int
@@ -425,12 +433,103 @@ vips_has_embedded_icc(VipsImage *in)
 }
 
 int
+vips_icc_backup(VipsImage *in, VipsImage **out)
+{
+  if (vips_copy(in, out, NULL))
+    return 1;
+
+  if (!vips_image_get_typeof(in, VIPS_META_ICC_NAME))
+    return 0;
+
+  const void *data = NULL;
+  size_t data_len = 0;
+
+  if (vips_image_get_blob(in, VIPS_META_ICC_NAME, &data, &data_len))
+    return 0;
+
+  if (!data || data_len < 128)
+    return 0;
+
+  vips_image_remove(*out, IMGPROXY_META_ICC_NAME);
+  vips_image_set_blob_copy(*out, IMGPROXY_META_ICC_NAME, data, data_len);
+
+  return 0;
+}
+
+int
+vips_icc_restore(VipsImage *in, VipsImage **out)
+{
+  if (vips_copy(in, out, NULL))
+    return 1;
+
+  if (vips_image_get_typeof(in, VIPS_META_ICC_NAME) ||
+      !vips_image_get_typeof(in, IMGPROXY_META_ICC_NAME))
+    return 0;
+
+  const void *data = NULL;
+  size_t data_len = 0;
+
+  if (vips_image_get_blob(in, IMGPROXY_META_ICC_NAME, &data, &data_len))
+    return 0;
+
+  if (!data || data_len < 128)
+    return 0;
+
+  vips_image_remove(*out, VIPS_META_ICC_NAME);
+  vips_image_set_blob_copy(*out, VIPS_META_ICC_NAME, data, data_len);
+
+  return 0;
+}
+
+int
 vips_icc_import_go(VipsImage *in, VipsImage **out)
 {
-  const int res = vips_icc_import(in, out, "embedded", TRUE, "pcs", vips_icc_get_pcs(in), NULL);
-  if (!res && *out)
-    vips_image_set_int(*out, "imgproxy-icc-imported", 1);
-  return res;
+  VipsImage *base = vips_image_new();
+  VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 5);
+
+  int has_alpha_16 = FALSE;
+
+  /* RGB16 and GREY16 images have max alpha 65535, but this is not handled by
+   * vips_icc_import. We need to extract the alpha channel and convert it to 0-255
+   */
+  if ((in->Type == VIPS_INTERPRETATION_RGB16 && in->Bands > 3) ||
+      (in->Type == VIPS_INTERPRETATION_GREY16 && in->Bands > 1)) {
+    int bands = in->Type == VIPS_INTERPRETATION_RGB16 ? 3 : 1;
+
+    if (vips_extract_band(in, &t[0], 0, "n", bands, NULL) ||
+        vips_extract_band(in, &t[1], bands, "n", 1, NULL)) {
+      clear_image(&base);
+      return 1;
+    }
+
+    in = t[0];
+    has_alpha_16 = TRUE;
+  }
+
+  if (vips_icc_import(in, out, "embedded", TRUE, "pcs", vips_icc_get_pcs(in), NULL)) {
+    clear_image(&base);
+    return 1;
+  }
+
+  /* Convert 16-bit alpha channel to 0-255 range and join it back to the image
+   */
+  if (has_alpha_16) {
+    t[2] = *out;
+    *out = NULL;
+
+    if (vips_cast(t[1], &t[3], t[2]->BandFmt, NULL) ||
+        vips_linear1(t[3], &t[4], 1.0 / 255.0, 0, NULL) ||
+        vips_bandjoin2(t[2], t[4], out, NULL)) {
+      clear_image(&base);
+      return 1;
+    }
+  }
+
+  vips_image_set_int(*out, "imgproxy-icc-imported", 1);
+
+  clear_image(&base);
+
+  return 0;
 }
 
 int
@@ -458,6 +557,7 @@ vips_icc_remove(VipsImage *in, VipsImage **out)
     return 1;
 
   vips_image_remove(*out, VIPS_META_ICC_NAME);
+  vips_image_remove(*out, IMGPROXY_META_ICC_NAME);
   vips_image_remove(*out, "exif-ifd0-WhitePoint");
   vips_image_remove(*out, "exif-ifd0-PrimaryChromaticities");
   vips_image_remove(*out, "exif-ifd2-ColorSpace");
@@ -509,7 +609,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
       return 1;
     }
 
-    in = t[0];
+    in = t[1];
     premultiplied = TRUE;
   }
 
@@ -910,6 +1010,16 @@ vips_jpegsave_go(VipsImage *in, void **buf, size_t *len, int quality, int interl
       "Q", quality,
       "optimize_coding", TRUE,
       "interlace", interlace,
+      NULL);
+}
+
+int
+vips_jxlsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort)
+{
+  return vips_jxlsave_buffer(
+      in, buf, len,
+      "Q", quality,
+      "effort", effort,
       NULL);
 }
 

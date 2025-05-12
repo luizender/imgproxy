@@ -225,7 +225,6 @@ func (s *ProcessingHandlerTestSuite) TestSourceNetworkValidation() {
 	var rw *httptest.ResponseRecorder
 
 	u := fmt.Sprintf("/unsafe/rs:fill:4:4/plain/%s/test1.png", server.URL)
-	fmt.Println(u)
 
 	rw = s.send(u)
 	s.Require().Equal(200, rw.Result().StatusCode)
@@ -374,7 +373,7 @@ func (s *ProcessingHandlerTestSuite) TestCacheControlPassthroughExpires() {
 	res := rw.Result()
 
 	// Use regex to allow some delay
-	s.Require().Regexp(regexp.MustCompile("max-age=123[0-9], public"), res.Header.Get("Cache-Control"))
+	s.Require().Regexp("max-age=123[0-9], public", res.Header.Get("Cache-Control"))
 	s.Require().Empty(res.Header.Get("Expires"))
 }
 
@@ -412,7 +411,7 @@ func (s *ProcessingHandlerTestSuite) TestETagReqNoIfNotModified() {
 	poStr, imgdata, etag := s.sampleETagData("loremipsumdolor")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Empty(r.Header.Get("If-None-Match"))
+		s.Empty(r.Header.Get("If-None-Match"))
 
 		rw.Header().Set("ETag", imgdata.Headers["ETag"])
 		rw.WriteHeader(200)
@@ -433,7 +432,7 @@ func (s *ProcessingHandlerTestSuite) TestETagDataNoIfNotModified() {
 	poStr, imgdata, etag := s.sampleETagData("")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Empty(r.Header.Get("If-None-Match"))
+		s.Empty(r.Header.Get("If-None-Match"))
 
 		rw.WriteHeader(200)
 		rw.Write(imgdata.Data)
@@ -453,7 +452,7 @@ func (s *ProcessingHandlerTestSuite) TestETagReqMatch() {
 	poStr, imgdata, etag := s.sampleETagData(`"loremipsumdolor"`)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Equal(imgdata.Headers["ETag"], r.Header.Get("If-None-Match"))
+		s.Equal(imgdata.Headers["ETag"], r.Header.Get("If-None-Match"))
 
 		rw.WriteHeader(304)
 	}))
@@ -475,7 +474,7 @@ func (s *ProcessingHandlerTestSuite) TestETagDataMatch() {
 	poStr, imgdata, etag := s.sampleETagData("")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Empty(r.Header.Get("If-None-Match"))
+		s.Empty(r.Header.Get("If-None-Match"))
 
 		rw.WriteHeader(200)
 		rw.Write(imgdata.Data)
@@ -499,7 +498,7 @@ func (s *ProcessingHandlerTestSuite) TestETagReqNotMatch() {
 	_, _, expectedETag := s.sampleETagData(`"loremipsum"`)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Equal(`"loremipsum"`, r.Header.Get("If-None-Match"))
+		s.Equal(`"loremipsum"`, r.Header.Get("If-None-Match"))
 
 		rw.Header().Set("ETag", imgdata.Headers["ETag"])
 		rw.WriteHeader(200)
@@ -525,7 +524,7 @@ func (s *ProcessingHandlerTestSuite) TestETagDataNotMatch() {
 	expectedETag := actualETag[:strings.IndexByte(actualETag, '/')] + "/Dasdbefj"
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Empty(r.Header.Get("If-None-Match"))
+		s.Empty(r.Header.Get("If-None-Match"))
 
 		rw.WriteHeader(200)
 		rw.Write(imgdata.Data)
@@ -550,7 +549,7 @@ func (s *ProcessingHandlerTestSuite) TestETagProcessingOptionsNotMatch() {
 	expectedETag := "abcdefj" + actualETag[strings.IndexByte(actualETag, '/'):]
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		s.Require().Empty(r.Header.Get("If-None-Match"))
+		s.Empty(r.Header.Get("If-None-Match"))
 
 		rw.Header().Set("ETag", imgdata.Headers["ETag"])
 		rw.WriteHeader(200)
@@ -595,7 +594,7 @@ func (s *ProcessingHandlerTestSuite) TestLastModifiedDisabled() {
 	rw := s.send("/unsafe/rs:fill:4:4/plain/" + ts.URL)
 	res := rw.Result()
 
-	s.Require().Equal("", res.Header.Get("Last-Modified"))
+	s.Require().Empty(res.Header.Get("Last-Modified"))
 }
 
 func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqExactMatchLastModifiedDisabled() {
@@ -604,7 +603,7 @@ func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqExactMatchLastModifiedD
 	lastModified := "Wed, 21 Oct 2015 07:28:00 GMT"
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		modifiedSince := r.Header.Get("If-Modified-Since")
-		s.Require().Empty(modifiedSince)
+		s.Empty(modifiedSince)
 		rw.WriteHeader(200)
 		rw.Write(data)
 	}))
@@ -623,7 +622,7 @@ func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqExactMatchLastModifiedE
 	lastModified := "Wed, 21 Oct 2015 07:28:00 GMT"
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		modifiedSince := r.Header.Get("If-Modified-Since")
-		s.Require().Equal(lastModified, modifiedSince)
+		s.Equal(lastModified, modifiedSince)
 		rw.WriteHeader(304)
 	}))
 	defer ts.Close()
@@ -641,7 +640,7 @@ func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqCompareMoreRecentLastMo
 	config.LastModifiedEnabled = false
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		modifiedSince := r.Header.Get("If-Modified-Since")
-		s.Require().Empty(modifiedSince)
+		s.Empty(modifiedSince)
 		rw.WriteHeader(200)
 		rw.Write(data)
 	}))
@@ -663,8 +662,8 @@ func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqCompareMoreRecentLastMo
 		fileLastModified, _ := time.Parse(http.TimeFormat, "Wed, 21 Oct 2015 07:28:00 GMT")
 		modifiedSince := r.Header.Get("If-Modified-Since")
 		parsedModifiedSince, err := time.Parse(http.TimeFormat, modifiedSince)
-		s.Require().NoError(err)
-		s.Require().True(fileLastModified.Before(parsedModifiedSince))
+		s.NoError(err)
+		s.True(fileLastModified.Before(parsedModifiedSince))
 		rw.WriteHeader(304)
 	}))
 	defer ts.Close()
@@ -684,7 +683,7 @@ func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqCompareTooOldLastModifi
 	data := s.readTestFile("test1.png")
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		modifiedSince := r.Header.Get("If-Modified-Since")
-		s.Require().Empty(modifiedSince)
+		s.Empty(modifiedSince)
 		rw.WriteHeader(200)
 		rw.Write(data)
 	}))
@@ -707,8 +706,8 @@ func (s *ProcessingHandlerTestSuite) TestModifiedSinceReqCompareTooOldLastModifi
 		fileLastModified, _ := time.Parse(http.TimeFormat, "Wed, 21 Oct 2015 07:28:00 GMT")
 		modifiedSince := r.Header.Get("If-Modified-Since")
 		parsedModifiedSince, err := time.Parse(http.TimeFormat, modifiedSince)
-		s.Require().NoError(err)
-		s.Require().True(fileLastModified.After(parsedModifiedSince))
+		s.NoError(err)
+		s.True(fileLastModified.After(parsedModifiedSince))
 		rw.WriteHeader(200)
 		rw.Write(data)
 	}))

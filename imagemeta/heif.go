@@ -2,11 +2,13 @@ package imagemeta
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"slices"
 
 	"github.com/imgproxy/imgproxy/v3/imagetype"
 )
@@ -14,6 +16,7 @@ import (
 const heifBoxHeaderSize = uint64(8)
 
 var heicBrand = []byte("heic")
+var heixBrand = []byte("heix")
 var avifBrand = []byte("avif")
 var heifPict = []byte("pict")
 
@@ -21,13 +24,33 @@ type heifDiscarder interface {
 	Discard(n int) (discarded int, err error)
 }
 
-type heifData struct {
-	Format        imagetype.Type
+type heifSize struct {
 	Width, Height int64
 }
 
-func (d *heifData) IsFilled() bool {
-	return d.Format != imagetype.Unknown && d.Width > 0 && d.Height > 0
+type heifData struct {
+	Format imagetype.Type
+	Sizes  []heifSize
+}
+
+func (d *heifData) Meta() (*meta, error) {
+	if d.Format == imagetype.Unknown {
+		return nil, newFormatError("HEIF", "format data wasn't found")
+	}
+
+	if len(d.Sizes) == 0 {
+		return nil, newFormatError("HEIF", "dimensions data wasn't found")
+	}
+
+	bestSize := slices.MaxFunc(d.Sizes, func(a, b heifSize) int {
+		return cmp.Compare(a.Width*a.Height, b.Width*b.Height)
+	})
+
+	return &meta{
+		format: d.Format,
+		width:  int(bestSize.Width),
+		height: int(bestSize.Height),
+	}, nil
 }
 
 func heifReadN(r io.Reader, n uint64) (b []byte, err error) {
@@ -41,6 +64,7 @@ func heifReadN(r io.Reader, n uint64) (b []byte, err error) {
 
 	b = make([]byte, n)
 	_, err = io.ReadFull(r, b)
+
 	return
 }
 
@@ -84,7 +108,7 @@ func heifReadBoxHeader(r io.Reader) (boxType string, boxDataSize uint64, err err
 	}
 
 	if boxDataSize < heifBoxHeaderSize || boxDataSize > math.MaxInt64 {
-		return "", 0, errors.New("Invalid box data size")
+		return "", 0, newFormatError("HEIF", "invalid box data size")
 	}
 
 	boxDataSize -= headerSize
@@ -93,7 +117,7 @@ func heifReadBoxHeader(r io.Reader) (boxType string, boxDataSize uint64, err err
 }
 
 func heifAssignFormat(d *heifData, brand []byte) bool {
-	if bytes.Equal(brand, heicBrand) {
+	if bytes.Equal(brand, heicBrand) || bytes.Equal(brand, heixBrand) {
 		d.Format = imagetype.HEIC
 		return true
 	}
@@ -108,7 +132,7 @@ func heifAssignFormat(d *heifData, brand []byte) bool {
 
 func heifReadFtyp(d *heifData, r io.Reader, boxDataSize uint64) error {
 	if boxDataSize < 8 {
-		return errors.New("Invalid ftyp data")
+		return newFormatError("HEIF", "invalid ftyp data")
 	}
 
 	data, err := heifReadN(r, boxDataSize)
@@ -128,12 +152,12 @@ func heifReadFtyp(d *heifData, r io.Reader, boxDataSize uint64) error {
 		}
 	}
 
-	return errors.New("Image is not compatible with heic/avif")
+	return newFormatError("HEIF", "image is not compatible with heic/avif")
 }
 
 func heifReadMeta(d *heifData, r io.Reader, boxDataSize uint64) error {
 	if boxDataSize < 4 {
-		return errors.New("Invalid meta data")
+		return newFormatError("HEIF", "invalid meta data")
 	}
 
 	data, err := heifReadN(r, boxDataSize)
@@ -142,7 +166,7 @@ func heifReadMeta(d *heifData, r io.Reader, boxDataSize uint64) error {
 	}
 
 	if boxDataSize > 4 {
-		if err := heifReadBoxes(d, bytes.NewBuffer(data[4:])); err != nil && err != io.EOF {
+		if err := heifReadBoxes(d, bytes.NewBuffer(data[4:])); err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 	}
@@ -152,7 +176,7 @@ func heifReadMeta(d *heifData, r io.Reader, boxDataSize uint64) error {
 
 func heifReadHldr(r io.Reader, boxDataSize uint64) error {
 	if boxDataSize < 12 {
-		return errors.New("Invalid hdlr data")
+		return newFormatError("HEIF", "invalid hdlr data")
 	}
 
 	data, err := heifReadN(r, boxDataSize)
@@ -161,7 +185,7 @@ func heifReadHldr(r io.Reader, boxDataSize uint64) error {
 	}
 
 	if !bytes.Equal(data[8:12], heifPict) {
-		return fmt.Errorf("Invalid handler. Expected: pict, actual: %s", data[8:12])
+		return newFormatError("HEIF", fmt.Sprintf("Invalid handler. Expected: pict, actual: %s", data[8:12]))
 	}
 
 	return nil
@@ -169,7 +193,7 @@ func heifReadHldr(r io.Reader, boxDataSize uint64) error {
 
 func heifReadIspe(r io.Reader, boxDataSize uint64) (w, h int64, err error) {
 	if boxDataSize < 12 {
-		return 0, 0, errors.New("Invalid ispe data")
+		return 0, 0, newFormatError("HEIF", "invalid ispe data")
 	}
 
 	data, err := heifReadN(r, boxDataSize)
@@ -196,16 +220,10 @@ func heifReadBoxes(d *heifData, r io.Reader) error {
 				return err
 			}
 		case "meta":
-			if err := heifReadMeta(d, r, boxDataSize); err != nil {
-				return err
-			}
-			if !d.IsFilled() {
-				return errors.New("Dimensions data wasn't found in meta box")
-			}
-			return nil
+			return heifReadMeta(d, r, boxDataSize)
 		case "hdlr":
 			if err := heifReadHldr(r, boxDataSize); err != nil {
-				return nil
+				return err
 			}
 		case "iprp", "ipco":
 			data, err := heifReadN(r, boxDataSize)
@@ -213,7 +231,7 @@ func heifReadBoxes(d *heifData, r io.Reader) error {
 				return err
 			}
 
-			if err := heifReadBoxes(d, bytes.NewBuffer(data)); err != nil && err != io.EOF {
+			if err := heifReadBoxes(d, bytes.NewBuffer(data)); err != nil && !errors.Is(err, io.EOF) {
 				return err
 			}
 		case "ispe":
@@ -221,8 +239,15 @@ func heifReadBoxes(d *heifData, r io.Reader) error {
 			if err != nil {
 				return err
 			}
-			if w > d.Width || h > d.Height {
-				d.Width, d.Height = w, h
+			d.Sizes = append(d.Sizes, heifSize{Width: w, Height: h})
+		case "irot":
+			data, err := heifReadN(r, boxDataSize)
+			if err != nil {
+				return err
+			}
+			if len(d.Sizes) > 0 && len(data) > 0 && (data[0] == 1 || data[0] == 3) {
+				lastSize := d.Sizes[len(d.Sizes)-1]
+				d.Sizes[len(d.Sizes)-1] = heifSize{Width: lastSize.Height, Height: lastSize.Width}
 			}
 		default:
 			if err := heifDiscardN(r, boxDataSize); err != nil {
@@ -235,15 +260,11 @@ func heifReadBoxes(d *heifData, r io.Reader) error {
 func DecodeHeifMeta(r io.Reader) (Meta, error) {
 	d := new(heifData)
 
-	if err := heifReadBoxes(d, r); err != nil && !d.IsFilled() {
+	if err := heifReadBoxes(d, r); err != nil {
 		return nil, err
 	}
 
-	return &meta{
-		format: d.Format,
-		width:  int(d.Width),
-		height: int(d.Height),
-	}, nil
+	return d.Meta()
 }
 
 func init() {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/imgproxy/imgproxy/v3/config"
 	"github.com/imgproxy/imgproxy/v3/httprange"
+	"github.com/imgproxy/imgproxy/v3/ierrors"
 	defaultTransport "github.com/imgproxy/imgproxy/v3/transport"
 	"github.com/imgproxy/imgproxy/v3/transport/common"
 	"github.com/imgproxy/imgproxy/v3/transport/notmodified"
@@ -71,14 +72,14 @@ func New() (http.RoundTripper, error) {
 	client, err = storage.NewClient(context.Background(), opts...)
 
 	if err != nil {
-		return nil, fmt.Errorf("Can't create GCS client: %s", err)
+		return nil, ierrors.Wrap(err, 0, ierrors.WithPrefix("Can't create GCS client"))
 	}
 
 	return transport{client}, nil
 }
 
 func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	bucket, key := common.GetBucketAndKey(req.URL)
+	bucket, key, query := common.GetBucketAndKey(req.URL)
 
 	if len(bucket) == 0 || len(key) == 0 {
 		body := strings.NewReader("Invalid GCS URL: bucket name or object key is empty")
@@ -87,7 +88,7 @@ func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			Proto:         "HTTP/1.0",
 			ProtoMajor:    1,
 			ProtoMinor:    0,
-			Header:        http.Header{},
+			Header:        http.Header{"Content-Type": {"text/plain"}},
 			ContentLength: int64(body.Len()),
 			Body:          io.NopCloser(body),
 			Close:         false,
@@ -98,7 +99,7 @@ func (t transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	bkt := t.client.Bucket(bucket)
 	obj := bkt.Object(key)
 
-	if g, err := strconv.ParseInt(req.URL.RawQuery, 10, 64); err == nil && g > 0 {
+	if g, err := strconv.ParseInt(query, 10, 64); err == nil && g > 0 {
 		obj = obj.Generation(g)
 	}
 
@@ -195,7 +196,7 @@ func handleError(req *http.Request, err error) (*http.Response, error) {
 		Proto:         "HTTP/1.0",
 		ProtoMajor:    1,
 		ProtoMinor:    0,
-		Header:        make(http.Header),
+		Header:        http.Header{"Content-Type": {"text/plain"}},
 		ContentLength: int64(len(err.Error())),
 		Body:          io.NopCloser(strings.NewReader(err.Error())),
 		Close:         false,
