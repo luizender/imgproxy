@@ -18,7 +18,7 @@ import (
 	"github.com/felixge/httpsnoop"
 	"github.com/shirou/gopsutil/process"
 	"github.com/sirupsen/logrus"
-	"go.opentelemetry.io/contrib/detectors/aws/ec2"
+	ec2 "go.opentelemetry.io/contrib/detectors/aws/ec2/v2"
 	"go.opentelemetry.io/contrib/detectors/aws/ecs"
 	"go.opentelemetry.io/contrib/detectors/aws/eks"
 	"go.opentelemetry.io/contrib/propagators/autoprop"
@@ -44,6 +44,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/config"
 	"github.com/imgproxy/imgproxy/v3/config/configurators"
 	"github.com/imgproxy/imgproxy/v3/ierrors"
+	"github.com/imgproxy/imgproxy/v3/logger"
 	"github.com/imgproxy/imgproxy/v3/metrics/errformat"
 	"github.com/imgproxy/imgproxy/v3/metrics/stats"
 	"github.com/imgproxy/imgproxy/v3/version"
@@ -185,7 +186,11 @@ func Init() error {
 func mapDeprecatedConfig() {
 	endpoint := os.Getenv("IMGPROXY_OPEN_TELEMETRY_ENDPOINT")
 	if len(endpoint) > 0 {
-		logrus.Warn("The IMGPROXY_OPEN_TELEMETRY_ENDPOINT config is deprecated. Use IMGPROXY_OPEN_TELEMETRY_ENABLE and OTEL_EXPORTER_OTLP_ENDPOINT instead. See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables")
+		logger.Deprecated(
+			"IMGPROXY_OPEN_TELEMETRY_ENDPOINT",
+			"IMGPROXY_OPEN_TELEMETRY_ENABLE and OTEL_EXPORTER_OTLP_ENDPOINT",
+			"See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables",
+		)
 		config.OpenTelemetryEnable = true
 	}
 
@@ -196,7 +201,11 @@ func mapDeprecatedConfig() {
 	protocol := "grpc"
 
 	if prot := os.Getenv("IMGPROXY_OPEN_TELEMETRY_PROTOCOL"); len(prot) > 0 {
-		logrus.Warn("The IMGPROXY_OPEN_TELEMETRY_PROTOCOL config is deprecated. Use OTEL_EXPORTER_OTLP_PROTOCOL instead. See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables")
+		logger.Deprecated(
+			"IMGPROXY_OPEN_TELEMETRY_PROTOCOL",
+			"OTEL_EXPORTER_OTLP_PROTOCOL",
+			"See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables",
+		)
 		protocol = prot
 		os.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", protocol)
 	}
@@ -207,7 +216,11 @@ func mapDeprecatedConfig() {
 		switch protocol {
 		case "grpc":
 			if insecure, _ := strconv.ParseBool(os.Getenv("IMGPROXY_OPEN_TELEMETRY_GRPC_INSECURE")); insecure {
-				logrus.Warn("The IMGPROXY_OPEN_TELEMETRY_GRPC_INSECURE config is deprecated. Use OTEL_EXPORTER_OTLP_ENDPOINT with the `http://` schema instead. See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables")
+				logger.Deprecated(
+					"IMGPROXY_OPEN_TELEMETRY_GRPC_INSECURE",
+					"OTEL_EXPORTER_OTLP_ENDPOINT with the `http://` schema",
+					"See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables",
+				)
 				schema = "http"
 			}
 		case "http":
@@ -218,18 +231,29 @@ func mapDeprecatedConfig() {
 	}
 
 	if serviceName := os.Getenv("IMGPROXY_OPEN_TELEMETRY_SERVICE_NAME"); len(serviceName) > 0 {
-		logrus.Warn("The IMGPROXY_OPEN_TELEMETRY_SERVICE_NAME config is deprecated. Use OTEL_SERVICE_NAME instead. See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables")
+		logger.Deprecated(
+			"IMGPROXY_OPEN_TELEMETRY_SERVICE_NAME",
+			"OTEL_SERVICE_NAME",
+			"See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables",
+		)
 		os.Setenv("OTEL_SERVICE_NAME", serviceName)
 	}
 
 	if propagators := os.Getenv("IMGPROXY_OPEN_TELEMETRY_PROPAGATORS"); len(propagators) > 0 {
-		logrus.Warn("The IMGPROXY_OPEN_TELEMETRY_PROPAGATORS config is deprecated. Use OTEL_PROPAGATORS instead. See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables")
+		logger.Deprecated(
+			"IMGPROXY_OPEN_TELEMETRY_PROPAGATORS",
+			"OTEL_PROPAGATORS",
+			"See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables",
+		)
 		os.Setenv("OTEL_PROPAGATORS", propagators)
 	}
 
 	if timeout := os.Getenv("IMGPROXY_OPEN_TELEMETRY_CONNECTION_TIMEOUT"); len(timeout) > 0 {
-		logrus.Warn("The IMGPROXY_OPEN_TELEMETRY_CONNECTION_TIMEOUT config is deprecated. Use OTEL_EXPORTER_OTLP_TIMEOUT instead. See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables")
-
+		logger.Deprecated(
+			"IMGPROXY_OPEN_TELEMETRY_CONNECTION_TIMEOUT",
+			"OTEL_EXPORTER_OTLP_TIMEOUT",
+			"See https://docs.imgproxy.net/latest/monitoring/open_telemetry#deprecated-environment-variables",
+		)
 		if to, _ := strconv.Atoi(timeout); to > 0 {
 			os.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", strconv.Itoa(to*1000))
 		}
@@ -426,12 +450,15 @@ func StartRootSpan(ctx context.Context, rw http.ResponseWriter, r *http.Request)
 	return ctx, cancel, newRw
 }
 
-func SetMetadata(ctx context.Context, key string, value interface{}) {
-	if !enabled {
+func setMetadata(span trace.Span, key string, value interface{}) {
+	if len(key) == 0 || value == nil {
 		return
 	}
 
-	span := trace.SpanFromContext(ctx)
+	if stringer, ok := value.(fmt.Stringer); ok {
+		span.SetAttributes(attribute.String(key, stringer.String()))
+		return
+	}
 
 	rv := reflect.ValueOf(value)
 
@@ -446,6 +473,10 @@ func SetMetadata(ctx context.Context, key string, value interface{}) {
 		span.SetAttributes(attribute.Int64(key, int64(rv.Uint())))
 	case rv.CanFloat():
 		span.SetAttributes(attribute.Float64(key, rv.Float()))
+	case rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String:
+		for _, k := range rv.MapKeys() {
+			setMetadata(span, key+"."+k.String(), rv.MapIndex(k).Interface())
+		}
 	default:
 		// Theoretically, we can also cover slices and arrays here,
 		// but it's pretty complex and not really needed for now
@@ -453,13 +484,29 @@ func SetMetadata(ctx context.Context, key string, value interface{}) {
 	}
 }
 
-func StartSpan(ctx context.Context, name string) context.CancelFunc {
+func SetMetadata(ctx context.Context, key string, value interface{}) {
+	if !enabled {
+		return
+	}
+
+	if ctx.Value(hasSpanCtxKey{}) != nil {
+		if span := trace.SpanFromContext(ctx); span != nil {
+			setMetadata(span, key, value)
+		}
+	}
+}
+
+func StartSpan(ctx context.Context, name string, meta map[string]any) context.CancelFunc {
 	if !enabled {
 		return func() {}
 	}
 
 	if ctx.Value(hasSpanCtxKey{}) != nil {
 		_, span := tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindInternal))
+
+		for k, v := range meta {
+			setMetadata(span, k, v)
+		}
 
 		return func() { span.End() }
 	}
@@ -557,6 +604,15 @@ func addDefaultMetrics() error {
 		return fmt.Errorf("Can't add go_threads gauge to OpenTelemetry: %s", err)
 	}
 
+	workersGauge, err := meter.Int64ObservableGauge(
+		"workers",
+		metric.WithUnit("1"),
+		metric.WithDescription("A gauge of the number of running workers."),
+	)
+	if err != nil {
+		return fmt.Errorf("Can't add workets gauge to OpenTelemetry: %s", err)
+	}
+
 	requestsInProgressGauge, err := meter.Float64ObservableGauge(
 		"requests_in_progress",
 		metric.WithUnit("1"),
@@ -573,6 +629,15 @@ func addDefaultMetrics() error {
 	)
 	if err != nil {
 		return fmt.Errorf("Can't add images_in_progress gauge to OpenTelemetry: %s", err)
+	}
+
+	workersUtilizationGauge, err := meter.Float64ObservableGauge(
+		"workers_utilization",
+		metric.WithUnit("%"),
+		metric.WithDescription("A gauge of the workers utilization in percents."),
+	)
+	if err != nil {
+		return fmt.Errorf("Can't add workers_utilization gauge to OpenTelemetry: %s", err)
 	}
 
 	bufferDefaultSizeGauge, err := meter.Int64ObservableGauge(
@@ -614,8 +679,10 @@ func addDefaultMetrics() error {
 			o.ObserveInt64(goGoroutines, int64(runtime.NumGoroutine()))
 			o.ObserveInt64(goThreads, int64(threadsNum))
 
+			o.ObserveInt64(workersGauge, int64(config.Workers))
 			o.ObserveFloat64(requestsInProgressGauge, stats.RequestsInProgress())
 			o.ObserveFloat64(imagesInProgressGauge, stats.ImagesInProgress())
+			o.ObserveFloat64(workersUtilizationGauge, stats.WorkersUtilization())
 
 			bufferStatsMutex.Lock()
 			defer bufferStatsMutex.Unlock()
@@ -635,8 +702,10 @@ func addDefaultMetrics() error {
 		goMemstatsHeapInuse,
 		goGoroutines,
 		goThreads,
+		workersGauge,
 		requestsInProgressGauge,
 		imagesInProgressGauge,
+		workersUtilizationGauge,
 		bufferDefaultSizeGauge,
 		bufferMaxSizeGauge,
 	)

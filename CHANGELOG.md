@@ -1,11 +1,89 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+- Add [IMGPROXY_FAIL_ON_DEPRECATION](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_FAIL_ON_DEPRECATION) config. When set to `true`, imgproxy will exit with a fatal error if a deprecated config option is used.
+- Add [flip](https://docs.imgproxy.net/latest/usage/processing#flip) processing option.
+- (pro) Add [IMGPROXY_AVIF_SUBSAMPLE](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_AVIF_SUBSAMPLE) config.
+- (pro) Add [avif_options](https://docs.imgproxy.net/latest/usage/processing#avif-options) processing option.
+- (pro) Return `orientation` field in the `/info` endpoint response when the [dimensions](https://docs.imgproxy.net/latest/usage/getting_info#dimensions) info option is enabled.
+
 ### Changed
+- When image source responds with a 4xx status code, imgproxy now responds with the same status code instead of always responding with `404 Not Found`.
+- When image source responds with a 5xx status code, imgproxy now responds with `502 Bad Gateway` instead of `500 Internal Server Error`.
+- Remove `iframe` elements from SVGs during sanitization.
+
+### Fixed
+- Fix crop coordinates calculation when the image has an EXIF orientation different from `1` and the `rotate` processing option is used.
+- Fix responding with 404 when a GCS bucket or object is missing.
+- Fix handling `:` encoded as `%3A` in processing/info options.
+- (pro) Fix generating video thumbnails when the server doesn't include the `Accept-Ranges` header in the response but includes the `Content-Range: bytes ...` header.
+
+## [3.30.1] - 2025-10-10
+### Changed
+- Format New Relic and OpenTelemetry metadata values that implement the `fmt.Stringer` interface as strings.
+
+### Fixed
+- (pro) Fix memory leak during video thumbnail generation.
+
+## [3.30.0] - 2025-09-17
+### Added
+- Add [IMGPROXY_GRACEFUL_STOP_TIMEOUT](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_GRACEFUL_STOP_TIMEOUT) config.
+- (pro) Add [color_profile](https://docs.imgproxy.net/latest/usage/processing#color-profile) processing option and [IMGPROXY_COLOR_PROFILES_DIR](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_COLOR_PROFILES_DIR) config.
+
+### Changed
+- Update the default graceful stop timeout to twice the [IMGPROXY_TIMEOUT](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_TIMEOUT) config value.
+- (pro) Improve video decoding performance.
+- (pro) Respond with `422 Unprocessable Entity` on error during video decoding.
+
+### Fixed
+- Fix the `Vary` header value when `IMGPROXY_AUTO_JXL` or `IMGPROXY_ENFORCE_JXL` configs are set to `true`.
+- Fix connection break when the `raw` processing option is used and the response status code does not allow a response body (such as `304 Not Modified`).
+- Fix the `If-Modified-Since` request header handling when the `raw` processing option is used.
+- Fix `X-Origin-Height` and `X-Result-Height` debug header values for animated images.
+- Fix keeping copyright info in EXIF.
+- Fix preserving color profiles in TIFF images.
+- Fix freezes during sanitization or minification of some broken SVGs.
+- (pro) Fix generating thumbnails for VP9 videos with high bit depth.
+- (pro) Fix `IMGPROXY_CUSTOM_RESPONSE_HEADERS` and `IMGPROXY_RESPONSE_HEADERS_PASSTHROUGH` configs behavior when the `raw` processing option is used.
+
+## [3.29.1] - 2025-07-11
+### Fixed
+- Fix parsing and minifying some SVGs.
+
+## [3.29.0] - 2025-07-08
+### Added
+- Add [IMGPROXY_MAX_RESULT_DIMENSION](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_MAX_RESULT_DIMENSION) config and [max_result_dimension](https://docs.imgproxy.net/latest/usage/processing#max-result-dimension) processing option.
+- Add [IMGPROXY_ALLOWED_PROCESSING_OPTIONS](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_ALLOWED_PROCESSING_OPTIONS) config.
+- (pro) Add [IMGPROXY_ALLOWED_INFO_OPTIONS](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_ALLOWED_INFO_OPTIONS) config.
+- (pro) Add [IMGPROXY_MAX_CHAINED_PIPELINES](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_MAX_CHAINED_PIPELINES) config.
+- Add `imgproxy.source_image_origin` attribute to New Relic, DataDog, and OpenTelemetry traces.
+- Add `imgproxy.source_image_url` and `imgproxy.source_image_origin` attributes to `downloading_image` spans in New Relic, DataDog, and OpenTelemetry traces.
+- Add `imgproxy.processing_options` attribute to `processing_image` spans in New Relic, DataDog, and OpenTelemetry traces.
+- Add `Source Image Origin` attribute to error reports.
+- Add `workers` and `workers_utilization` metrics to all metrics services.
+- (pro) Add [crop_aspect_ratio](https://docs.imgproxy.net/latest/usage/processing#crop-aspect-ratio) processing option.
+- (pro) Add [IMGPROXY_PDF_NO_BACKGROUND](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_PDF_NO_BACKGROUND) config.
+- Add [IMGPROXY_WEBP_EFFORT](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_WEBP_EFFORT) config.
+- Add [IMGPROXY_WEBP_PRESET](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_WEBP_PRESET) config.
+- (pro) Add support for saving images as PDF.
+
+### Changed
+- Suppress "Response has no supported checksum" warnings from S3 SDK.
+- The [IMGPROXY_USER_AGENT](https://docs.imgproxy.net/latest/configuration/options#IMGPROXY_USER_AGENT) config now supports the `%current_version` variable that is replaced with the current imgproxy version.
 - (docker) Optimized image quantization.
+- (pro) Improved BlurHash generation performance.
 
 ### Fixed
 - Fix `X-Origin-Content-Length` header value when SVG is sanitized or minified.
+- Mark JPEG XL format as supporting quality. Fixes autoquality for JPEG XL.
+- Fix the `extend` processing option when only one dimension is set.
+- (pro) Fix object detection when the `IMGPROXY_USE_LINEAR_COLORSPACE` config is set to `true`.
+- (pro) Fix BlurHash generation when the `IMGPROXY_USE_LINEAR_COLORSPACE` config is set to `true`.
+- (pro) Fix detection of PDF files with a header offset.
+
+### Removed
+- Remove the `IMGPROXY_SVG_FIX_UNSUPPORTED` config. The problem it was solving is now fixed in librsvg.
 
 ## [3.28.0] - 2025-03-31
 ### Added

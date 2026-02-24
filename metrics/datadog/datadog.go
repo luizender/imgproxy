@@ -5,14 +5,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/DataDog/datadog-go/v5/statsd"
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/ext"
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/felixge/httpsnoop"
 	log "github.com/sirupsen/logrus"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"github.com/imgproxy/imgproxy/v3/config"
 	"github.com/imgproxy/imgproxy/v3/metrics/errformat"
@@ -45,10 +47,16 @@ func Init() {
 		name = "imgproxy"
 	}
 
+	logStartup := false
+	if b, err := strconv.ParseBool(os.Getenv("DD_TRACE_STARTUP_LOGS")); err == nil {
+		logStartup = b
+	}
+
 	tracer.Start(
 		tracer.WithService(name),
 		tracer.WithServiceVersion(version.Version),
 		tracer.WithLogger(dataDogLogger{}),
+		tracer.WithLogStartup(logStartup),
 	)
 
 	enabled = true
@@ -123,23 +131,43 @@ func StartRootSpan(ctx context.Context, rw http.ResponseWriter, r *http.Request)
 	return context.WithValue(ctx, spanCtxKey{}, span), cancel, newRw
 }
 
+func setMetadata(span *tracer.Span, key string, value any) {
+	if len(key) == 0 || value == nil {
+		return
+	}
+
+	if rv := reflect.ValueOf(value); rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String {
+		for _, k := range rv.MapKeys() {
+			setMetadata(span, key+"."+k.String(), rv.MapIndex(k).Interface())
+		}
+		return
+	}
+
+	span.SetTag(key, value)
+}
+
 func SetMetadata(ctx context.Context, key string, value any) {
 	if !enabled {
 		return
 	}
 
-	if rootSpan, ok := ctx.Value(spanCtxKey{}).(tracer.Span); ok {
-		rootSpan.SetTag(key, value)
+	if rootSpan, ok := ctx.Value(spanCtxKey{}).(*tracer.Span); ok {
+		setMetadata(rootSpan, key, value)
 	}
 }
 
-func StartSpan(ctx context.Context, name string) context.CancelFunc {
+func StartSpan(ctx context.Context, name string, meta map[string]any) context.CancelFunc {
 	if !enabled {
 		return func() {}
 	}
 
-	if rootSpan, ok := ctx.Value(spanCtxKey{}).(tracer.Span); ok {
-		span := tracer.StartSpan(name, tracer.Measured(), tracer.ChildOf(rootSpan.Context()))
+	if rootSpan, ok := ctx.Value(spanCtxKey{}).(*tracer.Span); ok {
+		span := rootSpan.StartChild(name, tracer.Measured())
+
+		for k, v := range meta {
+			setMetadata(span, k, v)
+		}
+
 		return func() { span.Finish() }
 	}
 
@@ -151,7 +179,7 @@ func SendError(ctx context.Context, errType string, err error) {
 		return
 	}
 
-	if rootSpan, ok := ctx.Value(spanCtxKey{}).(tracer.Span); ok {
+	if rootSpan, ok := ctx.Value(spanCtxKey{}).(*tracer.Span); ok {
 		rootSpan.SetTag(ext.Error, err)
 		rootSpan.SetTag(ext.ErrorType, errformat.FormatErrType(errType, err))
 	}
@@ -197,8 +225,10 @@ func runMetricsCollector() {
 				}
 			}()
 
+			statsdClient.Gauge("imgproxy.workers", float64(config.Workers), nil, 1)
 			statsdClient.Gauge("imgproxy.requests_in_progress", stats.RequestsInProgress(), nil, 1)
 			statsdClient.Gauge("imgproxy.images_in_progress", stats.ImagesInProgress(), nil, 1)
+			statsdClient.Gauge("imgproxy.workers_utilization", stats.WorkersUtilization(), nil, 1)
 		case <-statsdClientStop:
 			return
 		}

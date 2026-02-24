@@ -8,11 +8,13 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/imgproxy/imgproxy/v3/config/configurators"
 	"github.com/imgproxy/imgproxy/v3/imagetype"
+	"github.com/imgproxy/imgproxy/v3/logger"
 	"github.com/imgproxy/imgproxy/v3/version"
 )
 
@@ -22,6 +24,7 @@ var (
 	Network                string
 	Bind                   string
 	Timeout                int
+	GracefulStopTimeout    int
 	ReadRequestTimeout     int
 	WriteResponseTimeout   int
 	KeepAliveTimeout       int
@@ -47,6 +50,8 @@ var (
 	MaxRedirects                int
 	PngUnlimited                bool
 	SvgUnlimited                bool
+	MaxResultDimension          int
+	AllowedProcessiongOptions   []string
 	AllowSecurityOptions        bool
 
 	JpegProgressive       bool
@@ -55,6 +60,8 @@ var (
 	PngQuantizationColors int
 	AvifSpeed             int
 	JxlEffort             int
+	WebpEffort            int
+	WebpPreset            WebpPresetKind
 	Quality               int
 	FormatQuality         map[imagetype.Type]int
 	StripMetadata         bool
@@ -63,7 +70,6 @@ var (
 	AutoRotate            bool
 	EnforceThumbnail      bool
 	ReturnAttachment      bool
-	SvgFixUnsupported     bool
 
 	AutoWebp          bool
 	EnforceWebp       bool
@@ -227,6 +233,7 @@ func Reset() {
 	Network = "tcp"
 	Bind = ":8080"
 	Timeout = 10
+	GracefulStopTimeout = 20
 	ReadRequestTimeout = 10
 	WriteResponseTimeout = 10
 	KeepAliveTimeout = 10
@@ -252,6 +259,8 @@ func Reset() {
 	MaxRedirects = 10
 	PngUnlimited = false
 	SvgUnlimited = false
+	MaxResultDimension = 0
+	AllowedProcessiongOptions = make([]string, 0)
 	AllowSecurityOptions = false
 
 	JpegProgressive = false
@@ -260,6 +269,8 @@ func Reset() {
 	PngQuantizationColors = 256
 	AvifSpeed = 8
 	JxlEffort = 4
+	WebpEffort = 4
+	WebpPreset = WebpPresetDefault
 	Quality = 80
 	FormatQuality = map[imagetype.Type]int{
 		imagetype.WEBP: 79,
@@ -272,7 +283,6 @@ func Reset() {
 	AutoRotate = true
 	EnforceThumbnail = false
 	ReturnAttachment = false
-	SvgFixUnsupported = false
 
 	AutoWebp = false
 	EnforceWebp = false
@@ -302,7 +312,7 @@ func Reset() {
 
 	AllowOrigin = ""
 
-	UserAgent = fmt.Sprintf("imgproxy/%s", version.Version)
+	UserAgent = "imgproxy/%current_version"
 
 	IgnoreSslVerification = false
 	DevelopmentErrorsMode = false
@@ -426,13 +436,16 @@ func Configure() error {
 	configurators.String(&Bind, "IMGPROXY_BIND")
 
 	if _, ok := os.LookupEnv("IMGPROXY_WRITE_TIMEOUT"); ok {
-		log.Warning("IMGPROXY_WRITE_TIMEOUT is deprecated, use IMGPROXY_TIMEOUT instead")
+		logger.Deprecated("IMGPROXY_WRITE_TIMEOUT", "IMGPROXY_TIMEOUT")
 		configurators.Int(&Timeout, "IMGPROXY_WRITE_TIMEOUT")
 	}
 	configurators.Int(&Timeout, "IMGPROXY_TIMEOUT")
 
+	GracefulStopTimeout = Timeout * 2
+	configurators.Int(&GracefulStopTimeout, "IMGPROXY_GRACEFUL_STOP_TIMEOUT")
+
 	if _, ok := os.LookupEnv("IMGPROXY_READ_TIMEOUT"); ok {
-		log.Warning("IMGPROXY_READ_TIMEOUT is deprecated, use IMGPROXY_READ_REQUEST_TIMEOUT instead")
+		logger.Deprecated("IMGPROXY_READ_TIMEOUT", "IMGPROXY_READ_REQUEST_TIMEOUT")
 		configurators.Int(&ReadRequestTimeout, "IMGPROXY_READ_TIMEOUT")
 	}
 	configurators.Int(&ReadRequestTimeout, "IMGPROXY_READ_REQUEST_TIMEOUT")
@@ -448,7 +461,10 @@ func Configure() error {
 		Workers = 1
 		log.Info("AWS Lambda environment detected, setting workers to 1")
 	} else {
-		configurators.Int(&Workers, "IMGPROXY_CONCURRENCY")
+		if _, ok := os.LookupEnv("IMGPROXY_CONCURRENCY"); ok {
+			logger.Deprecated("IMGPROXY_CONCURRENCY", "IMGPROXY_WORKERS")
+			configurators.Int(&Workers, "IMGPROXY_CONCURRENCY")
+		}
 		configurators.Int(&Workers, "IMGPROXY_WORKERS")
 	}
 
@@ -483,6 +499,9 @@ func Configure() error {
 	configurators.Bool(&PngUnlimited, "IMGPROXY_PNG_UNLIMITED")
 	configurators.Bool(&SvgUnlimited, "IMGPROXY_SVG_UNLIMITED")
 
+	configurators.Int(&MaxResultDimension, "IMGPROXY_MAX_RESULT_DIMENSION")
+	configurators.StringSlice(&AllowedProcessiongOptions, "IMGPROXY_ALLOWED_PROCESSING_OPTIONS")
+
 	configurators.Bool(&AllowSecurityOptions, "IMGPROXY_ALLOW_SECURITY_OPTIONS")
 
 	configurators.Bool(&JpegProgressive, "IMGPROXY_JPEG_PROGRESSIVE")
@@ -491,6 +510,10 @@ func Configure() error {
 	configurators.Int(&PngQuantizationColors, "IMGPROXY_PNG_QUANTIZATION_COLORS")
 	configurators.Int(&AvifSpeed, "IMGPROXY_AVIF_SPEED")
 	configurators.Int(&JxlEffort, "IMGPROXY_JXL_EFFORT")
+	configurators.Int(&WebpEffort, "IMGPROXY_WEBP_EFFORT")
+	if err := configurators.FromMap(&WebpPreset, "IMGPROXY_WEBP_PRESET", WebpPresets); err != nil {
+		return err
+	}
 	configurators.Int(&Quality, "IMGPROXY_QUALITY")
 	if err := configurators.ImageTypesQuality(FormatQuality, "IMGPROXY_FORMAT_QUALITY"); err != nil {
 		return err
@@ -501,14 +524,13 @@ func Configure() error {
 	configurators.Bool(&AutoRotate, "IMGPROXY_AUTO_ROTATE")
 	configurators.Bool(&EnforceThumbnail, "IMGPROXY_ENFORCE_THUMBNAIL")
 	configurators.Bool(&ReturnAttachment, "IMGPROXY_RETURN_ATTACHMENT")
-	configurators.Bool(&SvgFixUnsupported, "IMGPROXY_SVG_FIX_UNSUPPORTED")
 
 	if _, ok := os.LookupEnv("IMGPROXY_ENABLE_WEBP_DETECTION"); ok {
-		log.Warning("IMGPROXY_ENABLE_WEBP_DETECTION is deprecated, use IMGPROXY_AUTO_WEBP instead")
+		logger.Deprecated("IMGPROXY_ENABLE_WEBP_DETECTION", "IMGPROXY_AUTO_WEBP")
 		configurators.Bool(&AutoWebp, "IMGPROXY_ENABLE_WEBP_DETECTION")
 	}
 	if _, ok := os.LookupEnv("IMGPROXY_ENABLE_AVIF_DETECTION"); ok {
-		log.Warning("IMGPROXY_ENABLE_AVIF_DETECTION is deprecated, use IMGPROXY_AUTO_AVIF instead")
+		logger.Deprecated("IMGPROXY_ENABLE_AVIF_DETECTION", "IMGPROXY_AUTO_AVIF")
 		configurators.Bool(&AutoAvif, "IMGPROXY_ENABLE_AVIF_DETECTION")
 	}
 
@@ -556,6 +578,7 @@ func Configure() error {
 	configurators.String(&AllowOrigin, "IMGPROXY_ALLOW_ORIGIN")
 
 	configurators.String(&UserAgent, "IMGPROXY_USER_AGENT")
+	UserAgent = strings.ReplaceAll(UserAgent, "%current_version", version.Version)
 
 	configurators.Bool(&IgnoreSslVerification, "IMGPROXY_IGNORE_SSL_VERIFICATION")
 	configurators.Bool(&DevelopmentErrorsMode, "IMGPROXY_DEVELOPMENT_ERRORS_MODE")
@@ -750,6 +773,12 @@ func Configure() error {
 		return fmt.Errorf("JXL effort can't be greater than 9, now - %d\n", JxlEffort)
 	}
 
+	if WebpEffort < 1 {
+		return fmt.Errorf("Webp effort should be greater than 0, now - %d\n", WebpEffort)
+	} else if WebpEffort > 6 {
+		return fmt.Errorf("Webp effort can't be greater than 6, now - %d\n", WebpEffort)
+	}
+
 	if Quality <= 0 {
 		return fmt.Errorf("Quality should be greater than 0, now - %d\n", Quality)
 	} else if Quality > 100 {
@@ -780,7 +809,7 @@ func Configure() error {
 	}
 
 	if _, ok := os.LookupEnv("IMGPROXY_USE_GCS"); !ok && len(GCSKey) > 0 {
-		log.Warning("Set IMGPROXY_USE_GCS to true since it may be required by future versions to enable GCS support")
+		logger.Deprecated("Using IMGPROXY_GCS_KEY without IMGPROXY_USE_GCS", "IMGPROXY_USE_GCS=true with IMGPROXY_GCS_KEY")
 		GCSEnabled = true
 	}
 

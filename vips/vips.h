@@ -4,12 +4,16 @@
 #include <vips/vips7compat.h>
 #include <vips/vector.h>
 
+typedef struct _RGB {
+  double r;
+  double g;
+  double b;
+} RGB;
+
 int vips_initialize();
 
-void clear_image(VipsImage **in);
+void unref_image(VipsImage *in);
 void g_free_go(void **buf);
-
-void swap_and_clear(VipsImage **in, VipsImage *out);
 
 int gif_resolution_limit();
 
@@ -53,22 +57,22 @@ int vips_icc_restore(VipsImage *in, VipsImage **out);
 int vips_icc_import_go(VipsImage *in, VipsImage **out);
 int vips_icc_export_go(VipsImage *in, VipsImage **out);
 int vips_icc_export_srgb(VipsImage *in, VipsImage **out);
-int vips_icc_transform_go(VipsImage *in, VipsImage **out);
+int vips_icc_transform_srgb(VipsImage *in, VipsImage **out);
 int vips_icc_remove(VipsImage *in, VipsImage **out);
 int vips_colourspace_go(VipsImage *in, VipsImage **out, VipsInterpretation cs);
 
 int vips_rot_go(VipsImage *in, VipsImage **out, VipsAngle angle);
 int vips_flip_horizontal_go(VipsImage *in, VipsImage **out);
+int vips_flip_vertical_go(VipsImage *in, VipsImage **out);
 
 int vips_extract_area_go(VipsImage *in, VipsImage **out, int left, int top, int width, int height);
 int vips_smartcrop_go(VipsImage *in, VipsImage **out, int width, int height);
-int vips_trim(VipsImage *in, VipsImage **out, double threshold, gboolean smart, double r, double g,
-    double b, gboolean equal_hor, gboolean equal_ver);
+int vips_trim(VipsImage *in, VipsImage **out, double threshold, gboolean smart, RGB bg, gboolean equal_hor, gboolean equal_ver);
 
 int vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma, double sharp_sigma,
     int pixelate_pixels);
 
-int vips_flatten_go(VipsImage *in, VipsImage **out, double r, double g, double b);
+int vips_flatten_go(VipsImage *in, VipsImage **out, RGB bg);
 
 int vips_replicate_go(VipsImage *in, VipsImage **out, int across, int down, int centered);
 int vips_embed_go(VipsImage *in, VipsImage **out, int x, int y, int width, int height);
@@ -87,7 +91,7 @@ int vips_jpegsave_go(VipsImage *in, void **buf, size_t *len, int quality, int in
 int vips_jxlsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort);
 int vips_pngsave_go(VipsImage *in, void **buf, size_t *len, int interlace, int quantize,
     int colors);
-int vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality);
+int vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort, VipsForeignWebpPreset preset);
 int vips_gifsave_go(VipsImage *in, void **buf, size_t *len);
 int vips_heifsave_go(VipsImage *in, void **buf, size_t *len, int quality);
 int vips_avifsave_go(VipsImage *in, void **buf, size_t *len, int quality, int speed);

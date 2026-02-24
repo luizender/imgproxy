@@ -51,15 +51,17 @@ var vipsConf struct {
 	PngQuantizationColors C.int
 	AvifSpeed             C.int
 	JxlEffort             C.int
+	WebpEffort            C.int
+	WebpPreset            C.VipsForeignWebpPreset
 	PngUnlimited          C.int
 	SvgUnlimited          C.int
 }
 
 var badImageErrRe = []*regexp.Regexp{
 	regexp.MustCompile(`^(\S+)load_buffer: `),
+	regexp.MustCompile(`^(\S+)2vips: `),
 	regexp.MustCompile(`^VipsJpeg: `),
-	regexp.MustCompile(`^tiff2vips: `),
-	regexp.MustCompile(`^webp2vips: `),
+	regexp.MustCompile(`XML parse error: `),
 }
 
 func Init() error {
@@ -101,8 +103,24 @@ func Init() error {
 	vipsConf.PngQuantizationColors = C.int(config.PngQuantizationColors)
 	vipsConf.AvifSpeed = C.int(config.AvifSpeed)
 	vipsConf.JxlEffort = C.int(config.JxlEffort)
+	vipsConf.WebpEffort = C.int(config.WebpEffort)
 	vipsConf.PngUnlimited = gbool(config.PngUnlimited)
 	vipsConf.SvgUnlimited = gbool(config.SvgUnlimited)
+
+	switch config.WebpPreset {
+	case config.WebpPresetPhoto:
+		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_PHOTO
+	case config.WebpPresetPicture:
+		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_PICTURE
+	case config.WebpPresetDrawing:
+		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_DRAWING
+	case config.WebpPresetIcon:
+		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_ICON
+	case config.WebpPresetText:
+		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_TEXT
+	default:
+		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_DEFAULT
+	}
 
 	prometheus.AddGaugeFunc(
 		"vips_memory_bytes",
@@ -301,8 +319,23 @@ func gbool(b bool) C.gboolean {
 	return C.gboolean(0)
 }
 
+func cRGB(c Color) C.RGB {
+	return C.RGB{
+		r: C.double(c.R),
+		g: C.double(c.G),
+		b: C.double(c.B),
+	}
+}
+
 func ptrToBytes(ptr unsafe.Pointer, size int) []byte {
 	return (*[math.MaxInt32]byte)(ptr)[:int(size):int(size)]
+}
+
+func (img *Image) swapAndUnref(newImg *C.VipsImage) {
+	if img.VipsImage != nil {
+		C.unref_image(img.VipsImage)
+	}
+	img.VipsImage = newImg
 }
 
 func (img *Image) Width() int {
@@ -311,6 +344,10 @@ func (img *Image) Width() int {
 
 func (img *Image) Height() int {
 	return int(img.VipsImage.Ysize)
+}
+
+func (img *Image) PageHeight() int {
+	return int(C.vips_image_get_page_height(img.VipsImage))
 }
 
 func (img *Image) Pages() int {
@@ -360,11 +397,11 @@ func (img *Image) Load(imgdata *imagedata.ImageData, shrink int, scale float64, 
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	if imgdata.Type == imagetype.TIFF {
 		if C.vips_fix_float_tiff(img.VipsImage, &tmp) == 0 {
-			C.swap_and_clear(&img.VipsImage, tmp)
+			img.swapAndUnref(tmp)
 		} else {
 			log.Warnf("Can't fix TIFF: %s", Error())
 		}
@@ -387,7 +424,7 @@ func (img *Image) LoadThumbnail(imgdata *imagedata.ImageData) error {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -417,7 +454,7 @@ func (img *Image) Save(imgtype imagetype.Type, quality int) (*imagedata.ImageDat
 	case imagetype.PNG:
 		err = C.vips_pngsave_go(img.VipsImage, &ptr, &imgsize, vipsConf.PngInterlaced, vipsConf.PngQuantize, vipsConf.PngQuantizationColors)
 	case imagetype.WEBP:
-		err = C.vips_webpsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality))
+		err = C.vips_webpsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality), vipsConf.WebpEffort, vipsConf.WebpPreset)
 	case imagetype.GIF:
 		err = C.vips_gifsave_go(img.VipsImage, &ptr, &imgsize)
 	case imagetype.HEIC:
@@ -446,7 +483,8 @@ func (img *Image) Save(imgtype imagetype.Type, quality int) (*imagedata.ImageDat
 
 func (img *Image) Clear() {
 	if img.VipsImage != nil {
-		C.clear_image(&img.VipsImage)
+		C.unref_image(img.VipsImage)
+		img.VipsImage = nil
 	}
 }
 
@@ -457,7 +495,7 @@ func (img *Image) LineCache(lines int) error {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
@@ -473,7 +511,7 @@ func (img *Image) Arrayjoin(in []*Image) error {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
@@ -593,7 +631,7 @@ func (img *Image) CastUchar() error {
 		if C.vips_cast_go(img.VipsImage, &tmp, C.VIPS_FORMAT_UCHAR) != 0 {
 			return Error()
 		}
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	}
 
 	return nil
@@ -606,7 +644,7 @@ func (img *Image) Rad2Float() error {
 		if C.vips_rad2float_go(img.VipsImage, &tmp) != 0 {
 			return Error()
 		}
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	}
 
 	return nil
@@ -623,7 +661,7 @@ func (img *Image) Resize(wscale, hscale float64) error {
 		C.vips_image_set_int(tmp, cachedCString("imgproxy-scaled-down"), 1)
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -643,18 +681,45 @@ func (img *Image) Rotate(angle int) error {
 
 	C.vips_autorot_remove_angle(tmp)
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
-func (img *Image) Flip() error {
+func (img *Image) FlipHorizontal() error {
 	var tmp *C.VipsImage
 
 	if C.vips_flip_horizontal_go(img.VipsImage, &tmp) != 0 {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
+	return nil
+}
+
+func (img *Image) FlipVertical() error {
+	var tmp *C.VipsImage
+
+	if C.vips_flip_vertical_go(img.VipsImage, &tmp) != 0 {
+		return Error()
+	}
+
+	img.swapAndUnref(tmp)
+	return nil
+}
+
+func (img *Image) Flip(horizontal, vertical bool) error {
+	if horizontal {
+		if err := img.FlipHorizontal(); err != nil {
+			return err
+		}
+	}
+
+	if vertical {
+		if err := img.FlipVertical(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -665,7 +730,7 @@ func (img *Image) Crop(left, top, width, height int) error {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
@@ -683,7 +748,7 @@ func (img *Image) SmartCrop(width, height int) error {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
@@ -695,22 +760,21 @@ func (img *Image) Trim(threshold float64, smart bool, color Color, equalHor bool
 	}
 
 	if C.vips_trim(img.VipsImage, &tmp, C.double(threshold),
-		gbool(smart), C.double(color.R), C.double(color.G), C.double(color.B),
-		gbool(equalHor), gbool(equalVer)) != 0 {
+		gbool(smart), cRGB(color), gbool(equalHor), gbool(equalVer)) != 0 {
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
 func (img *Image) Flatten(bg Color) error {
 	var tmp *C.VipsImage
 
-	if C.vips_flatten_go(img.VipsImage, &tmp, C.double(bg.R), C.double(bg.G), C.double(bg.B)) != 0 {
+	if C.vips_flatten_go(img.VipsImage, &tmp, cRGB(bg)) != 0 {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -722,7 +786,7 @@ func (img *Image) ApplyFilters(blurSigma, sharpSigma float32, pixelatePixels int
 		return Error()
 	}
 
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -742,7 +806,7 @@ func (img *Image) BackupColourProfile() {
 	var tmp *C.VipsImage
 
 	if C.vips_icc_backup(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	} else {
 		log.Warningf("Can't backup ICC profile: %s", Error())
 	}
@@ -752,7 +816,7 @@ func (img *Image) RestoreColourProfile() {
 	var tmp *C.VipsImage
 
 	if C.vips_icc_restore(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	} else {
 		log.Warningf("Can't restore ICC profile: %s", Error())
 	}
@@ -777,7 +841,7 @@ func (img *Image) ImportColourProfile() error {
 	}
 
 	if C.vips_icc_import_go(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	} else {
 		log.Warningf("Can't import ICC profile: %s", Error())
 	}
@@ -799,7 +863,7 @@ func (img *Image) ExportColourProfile() error {
 	}
 
 	if C.vips_icc_export_go(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	} else {
 		log.Warningf("Can't export ICC profile: %s", Error())
 	}
@@ -816,7 +880,7 @@ func (img *Image) ExportColourProfileToSRGB() error {
 	}
 
 	if C.vips_icc_export_srgb(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	} else {
 		log.Warningf("Can't export ICC profile: %s", Error())
 	}
@@ -824,7 +888,7 @@ func (img *Image) ExportColourProfileToSRGB() error {
 	return nil
 }
 
-func (img *Image) TransformColourProfile() error {
+func (img *Image) TransformColourProfileToSRGB() error {
 	var tmp *C.VipsImage
 
 	// Don't transform is there's no embedded profile or embedded profile is sRGB
@@ -834,10 +898,10 @@ func (img *Image) TransformColourProfile() error {
 		return nil
 	}
 
-	if C.vips_icc_transform_go(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+	if C.vips_icc_transform_srgb(img.VipsImage, &tmp) == 0 {
+		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't transform ICC profile: %s", Error())
+		log.Warningf("Can't transform ICC profile to sRGB: %s", Error())
 	}
 
 	return nil
@@ -847,7 +911,7 @@ func (img *Image) RemoveColourProfile() error {
 	var tmp *C.VipsImage
 
 	if C.vips_icc_remove(img.VipsImage, &tmp) == 0 {
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	} else {
 		log.Warningf("Can't remove ICC profile: %s", Error())
 	}
@@ -870,7 +934,7 @@ func (img *Image) Colorspace(colorspace C.VipsInterpretation) error {
 		if C.vips_colourspace_go(img.VipsImage, &tmp, colorspace) != 0 {
 			return Error()
 		}
-		C.swap_and_clear(&img.VipsImage, tmp)
+		img.swapAndUnref(tmp)
 	}
 
 	return nil
@@ -881,7 +945,7 @@ func (img *Image) CopyMemory() error {
 	if tmp = C.vips_image_copy_memory(img.VipsImage); tmp == nil {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 	return nil
 }
 
@@ -891,7 +955,7 @@ func (img *Image) Replicate(width, height int, centered bool) error {
 	if C.vips_replicate_go(img.VipsImage, &tmp, C.int(width), C.int(height), gbool(centered)) != 0 {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -902,7 +966,7 @@ func (img *Image) Embed(width, height int, offX, offY int) error {
 	if C.vips_embed_go(img.VipsImage, &tmp, C.int(offX), C.int(offY), C.int(width), C.int(height)) != 0 {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -913,7 +977,7 @@ func (img *Image) ApplyWatermark(wm *Image, left, top int, opacity float64) erro
 	if C.vips_apply_watermark(img.VipsImage, wm.VipsImage, &tmp, C.int(left), C.int(top), C.double(opacity)) != 0 {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -924,7 +988,7 @@ func (img *Image) Strip(keepExifCopyright bool) error {
 	if C.vips_strip(img.VipsImage, &tmp, gbool(keepExifCopyright)) != 0 {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -935,7 +999,7 @@ func (img *Image) StripAll() error {
 	if C.vips_strip_all(img.VipsImage, &tmp) != 0 {
 		return Error()
 	}
-	C.swap_and_clear(&img.VipsImage, tmp)
+	img.swapAndUnref(tmp)
 
 	return nil
 }

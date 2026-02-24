@@ -22,7 +22,7 @@ var mainPipeline = pipeline{
 	trim,
 	prepare,
 	scaleOnLoad,
-	importColorProfile,
+	colorspaceToProcessing,
 	crop,
 	scale,
 	rotateAndFlip,
@@ -37,7 +37,7 @@ var mainPipeline = pipeline{
 }
 
 var finalizePipeline = pipeline{
-	exportColorProfile,
+	colorspaceToResult,
 	stripMetadata,
 }
 
@@ -88,10 +88,18 @@ func ValidatePreferredFormats() error {
 }
 
 func getImageSize(img *vips.Image) (int, int) {
-	width, height, _, _ := extractMeta(img, 0, true)
+	width, height := img.Width(), img.Height()
 
-	if pages, err := img.GetIntDefault("n-pages", 1); err != nil && pages > 0 {
-		height /= pages
+	if img.IsAnimated() {
+		// Animated images contain multiple frames, and libvips loads them stacked vertically.
+		// We want to return the size of a single frame
+		height = img.PageHeight()
+	}
+
+	// If the image is rotated by 90 or 270 degrees, we need to swap width and height
+	orientation := img.Orientation()
+	if orientation == 5 || orientation == 6 || orientation == 7 || orientation == 8 {
+		width, height = height, width
 	}
 
 	return width, height
@@ -353,10 +361,11 @@ func ProcessImage(ctx context.Context, imgdata *imagedata.ImageData, po *options
 		if outData.Headers == nil {
 			outData.Headers = make(map[string]string)
 		}
+		resultWidth, resultHeight := getImageSize(img)
 		outData.Headers["X-Origin-Width"] = strconv.Itoa(originWidth)
 		outData.Headers["X-Origin-Height"] = strconv.Itoa(originHeight)
-		outData.Headers["X-Result-Width"] = strconv.Itoa(img.Width())
-		outData.Headers["X-Result-Height"] = strconv.Itoa(img.Height())
+		outData.Headers["X-Result-Width"] = strconv.Itoa(resultWidth)
+		outData.Headers["X-Result-Height"] = strconv.Itoa(resultHeight)
 	}
 
 	return outData, err

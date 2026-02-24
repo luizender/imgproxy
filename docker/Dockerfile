@@ -1,4 +1,4 @@
-ARG BASE_IMAGE_VERSION="v3.13.2"
+ARG BASE_IMAGE_VERSION="v3.15.2"
 
 FROM ghcr.io/imgproxy/imgproxy-base:${BASE_IMAGE_VERSION} AS build
 
@@ -13,7 +13,7 @@ RUN rm -rf /opt/imgproxy/lib/pkgconfig /opt/imgproxy/lib/cmake
 # ==================================================================================================
 # AWS Lambda adapter
 
-FROM public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 AS lambda-adapter
+FROM public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 AS lambda-adapter
 
 # ==================================================================================================
 # Final image

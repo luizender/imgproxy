@@ -15,23 +15,15 @@ vips_initialize()
 }
 
 void
-clear_image(VipsImage **in)
+unref_image(VipsImage *in)
 {
-  if (G_IS_OBJECT(*in))
-    g_clear_object(in);
+  VIPS_UNREF(in);
 }
 
 void
 g_free_go(void **buf)
 {
   g_free(*buf);
-}
-
-void
-swap_and_clear(VipsImage **in, VipsImage *out)
-{
-  clear_image(in);
-  *in = out;
 }
 
 int
@@ -50,7 +42,7 @@ vips_health()
   int res = vips_black(&t[0], 4, 4, "bands", 4, NULL) ||
       !(t[1] = vips_image_copy_memory(t[0]));
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return res;
 }
@@ -137,12 +129,12 @@ vips_tiffload_go(void *buf, size_t len, VipsImage **out)
 int
 vips_black_go(VipsImage **out, int width, int height, int bands)
 {
-  VipsImage *tmp;
+  VipsImage *tmp = NULL;
 
   int res = vips_black(&tmp, width, height, "bands", bands, NULL) ||
       vips_copy(tmp, out, "interpretation", VIPS_INTERPRETATION_sRGB, NULL);
 
-  clear_image(&tmp);
+  VIPS_UNREF(tmp);
 
   return res;
 }
@@ -167,7 +159,7 @@ vips_fix_scRGB_alpha_tiff(VipsImage *in, VipsImage **out)
       vips_cast(t[2], &t[3], in->BandFmt, NULL) ||
       vips_bandjoin2(t[0], t[3], out, NULL);
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return res;
 #endif
@@ -196,7 +188,7 @@ vips_fix_BW_float_tiff(VipsImage *in, VipsImage **out)
         vips_linear1(t[1], &t[2], 65535.0, 0, NULL) ||
         vips_cast_ushort(t[2], &t[3], NULL) ||
         vips_copy(t[3], &t[4], "interpretation", VIPS_INTERPRETATION_GREY16, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -212,7 +204,7 @@ vips_fix_BW_float_tiff(VipsImage *in, VipsImage **out)
       vips_bandjoin(rgb, &t[5], 3, NULL) ||
       vips_colourspace(t[5], &t[6], VIPS_INTERPRETATION_GREY16,
           "source_space", VIPS_INTERPRETATION_scRGB, NULL)) {
-    clear_image(&base);
+    VIPS_UNREF(base);
     return 1;
   }
 
@@ -225,7 +217,7 @@ vips_fix_BW_float_tiff(VipsImage *in, VipsImage **out)
   else
     res = vips_icc_remove(t[6], out);
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return res;
 }
@@ -366,7 +358,7 @@ vips_resize_go(VipsImage *in, VipsImage **out, double wscale, double hscale)
       vips_unpremultiply(t[2], &t[3], NULL) ||
       vips_cast(t[3], out, format, NULL);
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return res;
 }
@@ -407,6 +399,7 @@ vips_icc_is_srgb_iec61966(VipsImage *in)
   /* Predict it is sRGB IEC61966 2.1 by checking some header fields
    */
   return ((memcmp(data + 48, "IEC ", 4) == 0) && // Device manufacturer
+      (memcmp(data + 16, "RGB ", 4) == 0) &&     // Colorspace
       (memcmp(data + 52, "sRGB", 4) == 0) &&     // Device model
       (memcmp(data + 80, "HP  ", 4) == 0) &&     // Profile creator
       (memcmp(data + 24, date, 6) == 0) &&       // Date of creation
@@ -498,7 +491,7 @@ vips_icc_import_go(VipsImage *in, VipsImage **out)
 
     if (vips_extract_band(in, &t[0], 0, "n", bands, NULL) ||
         vips_extract_band(in, &t[1], bands, "n", 1, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -507,7 +500,7 @@ vips_icc_import_go(VipsImage *in, VipsImage **out)
   }
 
   if (vips_icc_import(in, out, "embedded", TRUE, "pcs", vips_icc_get_pcs(in), NULL)) {
-    clear_image(&base);
+    VIPS_UNREF(base);
     return 1;
   }
 
@@ -520,14 +513,14 @@ vips_icc_import_go(VipsImage *in, VipsImage **out)
     if (vips_cast(t[1], &t[3], t[2]->BandFmt, NULL) ||
         vips_linear1(t[3], &t[4], 1.0 / 255.0, 0, NULL) ||
         vips_bandjoin2(t[2], t[4], out, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
   }
 
   vips_image_set_int(*out, "imgproxy-icc-imported", 1);
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return 0;
 }
@@ -545,7 +538,7 @@ vips_icc_export_srgb(VipsImage *in, VipsImage **out)
 }
 
 int
-vips_icc_transform_go(VipsImage *in, VipsImage **out)
+vips_icc_transform_srgb(VipsImage *in, VipsImage **out)
 {
   return vips_icc_transform(in, out, "sRGB", "embedded", TRUE, "pcs", vips_icc_get_pcs(in), NULL);
 }
@@ -584,6 +577,12 @@ vips_flip_horizontal_go(VipsImage *in, VipsImage **out)
 }
 
 int
+vips_flip_vertical_go(VipsImage *in, VipsImage **out)
+{
+  return vips_flip(in, out, VIPS_DIRECTION_VERTICAL, NULL);
+}
+
+int
 vips_smartcrop_go(VipsImage *in, VipsImage **out, int width, int height)
 {
   return vips_smartcrop(in, out, width, height, NULL);
@@ -605,7 +604,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
     if (
         vips_premultiply(in, &t[0], NULL) ||
         vips_cast(t[0], &t[1], format, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -615,7 +614,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
 
   if (blur_sigma > 0.0) {
     if (vips_gaussblur(in, &t[2], blur_sigma, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -624,7 +623,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
 
   if (sharp_sigma > 0.0) {
     if (vips_sharpen(in, &t[3], "sigma", sharp_sigma, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -639,12 +638,12 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
     w = in->Xsize;
     h = in->Ysize;
 
-    tw = (int) (VIPS_CEIL((double) w / pixelate_pixels)) * pixelate_pixels;
-    th = (int) (VIPS_CEIL((double) h / pixelate_pixels)) * pixelate_pixels;
+    tw = (int) ceil((double) w / pixelate_pixels) * pixelate_pixels;
+    th = (int) ceil((double) h / pixelate_pixels) * pixelate_pixels;
 
     if (tw > w || th > h) {
       if (vips_embed(in, &t[4], 0, 0, tw, th, "extend", VIPS_EXTEND_MIRROR, NULL)) {
-        clear_image(&base);
+        VIPS_UNREF(base);
         return 1;
       }
 
@@ -654,7 +653,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
     if (
         vips_shrink(in, &t[5], pixelate_pixels, pixelate_pixels, NULL) ||
         vips_zoom(t[5], &t[6], pixelate_pixels, pixelate_pixels, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -662,7 +661,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
 
     if (tw > w || th > h) {
       if (vips_extract_area(in, &t[7], 0, 0, w, h, NULL)) {
-        clear_image(&base);
+        VIPS_UNREF(base);
         return 1;
       }
 
@@ -672,7 +671,7 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
 
   if (premultiplied) {
     if (vips_unpremultiply(in, &t[8], NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -683,20 +682,20 @@ vips_apply_filters(VipsImage *in, VipsImage **out, double blur_sigma,
       vips_colourspace(in, &t[9], interpretation, NULL) ||
       vips_cast(t[9], out, format, NULL);
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return res;
 }
 
 int
-vips_flatten_go(VipsImage *in, VipsImage **out, double r, double g, double b)
+vips_flatten_go(VipsImage *in, VipsImage **out, RGB bg)
 {
   if (!vips_image_hasalpha(in))
     return vips_copy(in, out, NULL);
 
-  VipsArrayDouble *bg = vips_array_double_newv(3, r, g, b);
-  int res = vips_flatten(in, out, "background", bg, NULL);
-  vips_area_unref((VipsArea *) bg);
+  VipsArrayDouble *bga = vips_array_double_newv(3, bg.r, bg.g, bg.b);
+  int res = vips_flatten(in, out, "background", bga, NULL);
+  vips_area_unref((VipsArea *) bga);
   return res;
 }
 
@@ -708,8 +707,7 @@ vips_extract_area_go(VipsImage *in, VipsImage **out, int left, int top, int widt
 
 int
 vips_trim(VipsImage *in, VipsImage **out, double threshold,
-    gboolean smart, double r, double g, double b,
-    gboolean equal_hor, gboolean equal_ver)
+    gboolean smart, RGB bg, gboolean equal_hor, gboolean equal_ver)
 {
 
   VipsImage *base = vips_image_new();
@@ -719,41 +717,42 @@ vips_trim(VipsImage *in, VipsImage **out, double threshold,
 
   if (vips_image_guess_interpretation(in) != VIPS_INTERPRETATION_sRGB) {
     if (vips_colourspace(in, &t[0], VIPS_INTERPRETATION_sRGB, NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
     tmp = t[0];
   }
 
   if (vips_image_hasalpha(tmp)) {
-    if (vips_flatten_go(tmp, &t[1], 255.0, 0, 255.0)) {
-      clear_image(&base);
+    RGB f_bg = { 255.0, 0, 255.0 };
+    if (vips_flatten_go(tmp, &t[1], f_bg)) {
+      VIPS_UNREF(base);
       return 1;
     }
     tmp = t[1];
   }
 
-  double *bg = NULL;
-  int bgn;
+  double *img_bg = NULL;
+  int img_bgn;
   VipsArrayDouble *bga;
 
   if (smart) {
-    if (vips_getpoint(tmp, &bg, &bgn, 0, 0, NULL)) {
-      clear_image(&base);
+    if (vips_getpoint(tmp, &img_bg, &img_bgn, 0, 0, NULL)) {
+      VIPS_UNREF(base);
       return 1;
     }
-    bga = vips_array_double_new(bg, bgn);
+    bga = vips_array_double_new(img_bg, img_bgn);
   }
   else {
-    bga = vips_array_double_newv(3, r, g, b);
+    bga = vips_array_double_newv(3, bg.r, bg.g, bg.b);
   }
 
   int left, right, top, bot, width, height, diff;
   int res = vips_find_trim(tmp, &left, &top, &width, &height, "background", bga, "threshold", threshold, NULL);
 
-  clear_image(&base);
+  VIPS_UNREF(base);
   vips_area_unref((VipsArea *) bga);
-  g_free(bg);
+  g_free(img_bg);
 
   if (res) {
     return 1;
@@ -793,10 +792,10 @@ vips_trim(VipsImage *in, VipsImage **out, double threshold,
 int
 vips_replicate_go(VipsImage *in, VipsImage **out, int width, int height, int centered)
 {
-  VipsImage *tmp;
+  VipsImage *tmp = NULL;
 
-  int across = VIPS_CEIL((double) width / in->Xsize);
-  int down = VIPS_CEIL((double) height / in->Ysize);
+  int across = ceil((double) width / in->Xsize);
+  int down = ceil((double) height / in->Ysize);
 
   if (centered) {
     if (across % 2 == 0)
@@ -812,11 +811,11 @@ vips_replicate_go(VipsImage *in, VipsImage **out, int width, int height, int cen
   const int top = centered ? (tmp->Ysize - height) / 2 : 0;
 
   if (vips_extract_area(tmp, out, left, top, width, height, NULL)) {
-    clear_image(&tmp);
+    VIPS_UNREF(tmp);
     return 1;
   }
 
-  clear_image(&tmp);
+  VIPS_UNREF(tmp);
 
   return 0;
 }
@@ -836,8 +835,7 @@ vips_embed_go(VipsImage *in, VipsImage **out, int x, int y, int width, int heigh
   int ret =
       vips_embed(in, out, x, y, width, height, "extend", VIPS_EXTEND_BLACK, NULL);
 
-  if (tmp)
-    clear_image(&tmp);
+  VIPS_UNREF(tmp);
 
   return ret;
 }
@@ -861,7 +859,7 @@ vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, int l
         vips_extract_band(watermark, &t[2], watermark->Bands - 1, "n", 1, NULL) ||
         vips_linear1(t[2], &t[3], opacity, 0, NULL) ||
         vips_bandjoin2(t[1], t[3], &t[4], NULL)) {
-      clear_image(&base);
+      VIPS_UNREF(base);
       return 1;
     }
 
@@ -876,7 +874,7 @@ vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, int l
           "x", left, "y", top, "compositing_space", in->Type,
           NULL) ||
       vips_cast(t[5], &t[6], vips_image_get_format(in), NULL)) {
-    clear_image(&base);
+    VIPS_UNREF(base);
     return 1;
   }
 
@@ -889,7 +887,7 @@ vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, int l
     res = vips_copy(t[6], out, NULL);
   }
 
-  clear_image(&base);
+  VIPS_UNREF(base);
 
   return res;
 }
@@ -961,7 +959,7 @@ vips_strip(VipsImage *in, VipsImage **out, int keep_exif_copyright)
 
   VipsStripOptions opts = {
     .strip_all = 0,
-    .keep_exif_copyright = FALSE,
+    .keep_exif_copyright = keep_exif_copyright,
     .keep_animation = FALSE,
   };
 
@@ -1066,11 +1064,13 @@ vips_pngsave_go(VipsImage *in, void **buf, size_t *len, int interlace, int quant
 }
 
 int
-vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality)
+vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort, VipsForeignWebpPreset preset)
 {
   return vips_webpsave_buffer(
       in, buf, len,
       "Q", quality,
+      "effort", effort,
+      "preset", preset,
       NULL);
 }
 

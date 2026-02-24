@@ -6,7 +6,7 @@ import (
 	"github.com/imgproxy/imgproxy/v3/vips"
 )
 
-func exportColorProfile(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
+func colorspaceToResult(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
 	keepProfile := !po.StripColorProfile && po.Format.SupportsColourProfile()
 
 	if img.IsLinear() {
@@ -36,7 +36,7 @@ func exportColorProfile(pctx *pipelineContext, img *vips.Image, po *options.Proc
 	} else if !keepProfile {
 		// We don't import ICC profile and don't want to keep it,
 		// so we need to transform it to sRGB for maximum compatibility
-		if err := img.TransformColourProfile(); err != nil {
+		if err := img.TransformColourProfileToSRGB(); err != nil {
 			return err
 		}
 	}
