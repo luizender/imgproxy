@@ -1,38 +1,33 @@
 package processing
 
 import (
+	"log/slog"
 	"math"
 
-	log "github.com/sirupsen/logrus"
-
-	"github.com/imgproxy/imgproxy/v3/config"
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/imagetype"
-	"github.com/imgproxy/imgproxy/v3/imath"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
+	"github.com/imgproxy/imgproxy/v4/imagetype"
+	"github.com/imgproxy/imgproxy/v4/imath"
+	"github.com/imgproxy/imgproxy/v4/vips"
 )
 
-func canScaleOnLoad(pctx *pipelineContext, imgdata *imagedata.ImageData, scale float64) bool {
-	if imgdata == nil || pctx.trimmed || scale == 1 {
+func (p *Processor) canScaleOnLoad(c *Context, shrink float64) bool {
+	if c.ImgData == nil || shrink == 1 {
 		return false
 	}
 
-	if imgdata.Type.IsVector() {
+	if c.ImgData.Format().IsVector() {
 		return true
 	}
 
-	if config.DisableShrinkOnLoad || scale >= 1 {
+	if p.config.DisableShrinkOnLoad || shrink <= 1 {
 		return false
 	}
 
-	return imgdata.Type == imagetype.JPEG ||
-		imgdata.Type == imagetype.WEBP ||
-		imgdata.Type == imagetype.HEIC ||
-		imgdata.Type == imagetype.AVIF
+	return c.ImgData.Format() == imagetype.JPEG ||
+		c.ImgData.Format() == imagetype.WEBP ||
+		c.ImgData.Format().SupportsThumbnail()
 }
 
-func calcJpegShink(shrink float64) int {
+func calcJpegShink(shrink float64) float64 {
 	switch {
 	case shrink >= 8:
 		return 8
@@ -45,81 +40,115 @@ func calcJpegShink(shrink float64) int {
 	return 1
 }
 
-func scaleOnLoad(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	wshrink := float64(pctx.srcWidth) / float64(imath.Scale(pctx.srcWidth, pctx.wscale))
-	hshrink := float64(pctx.srcHeight) / float64(imath.Scale(pctx.srcHeight, pctx.hscale))
-	preshrink := math.Min(wshrink, hshrink)
-	prescale := 1.0 / preshrink
+func (p *Processor) scaleOnLoad(c *Context) error {
+	// Get the preshrink value based on the requested scales.
+	// We calculate it based on the image dimensions that we would get
+	// with the current scales.
+	// We can't just use c.WScale and c.HScale since this may lead to
+	// overshrinking when only one target dimension is set.
+	wshrink := float64(c.SrcWidth) / float64(imath.Scale(c.SrcWidth, c.WScale))
+	hshrink := float64(c.SrcHeight) / float64(imath.Scale(c.SrcHeight, c.HScale))
+	preshrink := min(wshrink, hshrink)
 
-	if !canScaleOnLoad(pctx, imgdata, prescale) {
+	// For vector images, apply the vector base shrink.
+	// We might set it in the [Processor.vectorGuardScale] step in case the image
+	// is too large.
+	if c.ImgData != nil && c.ImgData.Format().IsVector() {
+		preshrink *= c.VectorBaseShrink
+	}
+
+	// Check if we can and should scale the image on load
+	if !p.canScaleOnLoad(c, preshrink) {
 		return nil
 	}
 
-	var newWidth, newHeight int
+	// We will load the prescaled image into this new image.
+	// On success, we will swap it with the original image in the context,
+	// so we can safely clear it on function exit.
+	newImg := new(vips.Image)
+	defer newImg.Clear()
 
-	if imgdata.Type.SupportsThumbnail() {
-		thumbnail := new(vips.Image)
-		defer thumbnail.Clear()
+	loadThumbnail := c.ImgData.Format().SupportsThumbnail()
 
-		if err := thumbnail.LoadThumbnail(imgdata); err != nil {
-			log.Debugf("Can't load thumbnail: %s", err)
+	if loadThumbnail {
+		// If the image supports embedded thumbnails, try to load it
+		if err := newImg.LoadThumbnail(c.ImgData); err != nil {
+			slog.Debug("Can't load thumbnail: %s", "error", err)
 			return nil
 		}
-
-		angle, flip := 0, false
-		newWidth, newHeight, angle, flip = extractMeta(thumbnail, po.Rotate, po.AutoRotate)
-
-		if newWidth >= pctx.srcWidth || float64(newWidth)/float64(pctx.srcWidth) < prescale {
-			return nil
-		}
-
-		img.Swap(thumbnail)
-		pctx.angle = angle
-		pctx.flip = flip
 	} else {
-		jpegShrink := calcJpegShink(preshrink)
+		// JPEG shrink-on-load must be 1, 2, 4 or 8.
+		// We need to normalize it before passing to libvips.
+		// For other formats, we can pass any float value.
+		if c.ImgData.Format() == imagetype.JPEG {
+			preshrink = calcJpegShink(preshrink)
+		}
 
-		if pctx.imgtype == imagetype.JPEG && jpegShrink == 1 {
+		// if preshrink is 1, we can skip reloading the image
+		if preshrink == 1 {
 			return nil
 		}
 
-		if err := img.Load(imgdata, jpegShrink, prescale, 1); err != nil {
+		// Reload the image with preshrink
+		if err := newImg.Load(c.ImgData, preshrink, 0, 1); err != nil {
 			return err
 		}
-
-		newWidth, newHeight, _, _ = extractMeta(img, po.Rotate, po.AutoRotate)
 	}
+
+	// Get the geometry of the preshrunk image
+	newWidth, newHeight, newAngle, newFlip := ExtractGeometry(
+		newImg, c.PO.Rotate(), c.PO.AutoRotate(),
+	)
+
+	// Calculate the actual preshrink values
+	wpreshrink := float64(c.SrcWidth) / float64(newWidth)
+	hpreshrink := float64(c.SrcHeight) / float64(newHeight)
+
+	// If we loaded a thumbnail, check if it's worth using it
+	if loadThumbnail {
+		// If the thumbnail is not smaller than the original image or
+		// if it is shrunk too much, we better keep the original image
+		if min(wpreshrink, hpreshrink) <= 1.0 || max(wpreshrink, hpreshrink) > preshrink {
+			return nil
+		}
+	}
+
+	// Swap the image with the preshrunk one and update its orientation in the context
+	c.Img.Swap(newImg)
+	c.Angle = newAngle
+	c.Flip = newFlip
 
 	// Update scales after scale-on-load
-	wpreshrink := float64(pctx.srcWidth) / float64(newWidth)
-	hpreshrink := float64(pctx.srcHeight) / float64(newHeight)
+	c.WScale *= wpreshrink
+	c.HScale *= hpreshrink
 
-	pctx.wscale = wpreshrink * pctx.wscale
-	if newWidth == imath.Scale(newWidth, pctx.wscale) {
-		pctx.wscale = 1.0
+	// If preshrink is exact, it's better to set scale to 1.0
+	// to prevent additional scaling passes
+	if newWidth == imath.Scale(newWidth, c.WScale) {
+		c.WScale = 1.0
 	}
-
-	pctx.hscale = hpreshrink * pctx.hscale
-	if newHeight == imath.Scale(newHeight, pctx.hscale) {
-		pctx.hscale = 1.0
+	if newHeight == imath.Scale(newHeight, c.HScale) {
+		c.HScale = 1.0
 	}
 
 	// We should crop before scaling, but we scaled the image on load,
 	// so we need to adjust crop options
-	if pctx.cropWidth > 0 {
-		pctx.cropWidth = imath.Max(1, imath.Shrink(pctx.cropWidth, wpreshrink))
+	if c.CropWidth > 0 {
+		c.CropWidth = max(1, imath.Shrink(c.CropWidth, wpreshrink))
 	}
-	if pctx.cropHeight > 0 {
-		pctx.cropHeight = imath.Max(1, imath.Shrink(pctx.cropHeight, hpreshrink))
+	if c.CropHeight > 0 {
+		c.CropHeight = max(1, imath.Shrink(c.CropHeight, hpreshrink))
 	}
-	if pctx.cropGravity.Type != options.GravityFocusPoint {
-		// Adjust only when crop gravity offsets are absolute
-		if math.Abs(pctx.cropGravity.X) >= 1.0 {
-			// Round offsets to prevent turning absolute offsets to relative (ex: 1.0 => 0.5)
-			pctx.cropGravity.X = math.RoundToEven(pctx.cropGravity.X / wpreshrink)
+	// Adjust crop gravity offsets.
+	// We don't need to adjust focus point offsets since they are always relative.
+	// For other gravity types, we need to adjust only absolute offsets (>= 1.0 or <= -1.0).
+	// We round absolute offsets to prevent turning them to relative (ex: 1.0 => 0.5).
+	if c.CropGravity.Type != GravityFocusPoint {
+		if math.Abs(c.CropGravity.X) >= 1.0 {
+			c.CropGravity.X = math.RoundToEven(c.CropGravity.X / wpreshrink)
 		}
-		if math.Abs(pctx.cropGravity.Y) >= 1.0 {
-			pctx.cropGravity.Y = math.RoundToEven(pctx.cropGravity.Y / hpreshrink)
+		if math.Abs(c.CropGravity.Y) >= 1.0 {
+			c.CropGravity.Y = math.RoundToEven(c.CropGravity.Y / hpreshrink)
 		}
 	}
 

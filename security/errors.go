@@ -1,89 +1,61 @@
 package security
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
-	"github.com/imgproxy/imgproxy/v3/ierrors"
+	"github.com/imgproxy/imgproxy/v4/errctx"
 )
 
 type (
-	SignatureError       string
-	FileSizeError        struct{}
-	ImageResolutionError string
-	SecurityOptionsError struct{}
-	SourceURLError       string
-	SourceAddressError   string
+	SignatureError       struct{ *errctx.TextError }
+	ImageResolutionError struct{ *errctx.TextError }
+	SourceURLError       struct{ *errctx.TextError }
 )
 
 func newSignatureError(msg string) error {
-	return ierrors.Wrap(
-		SignatureError(msg),
+	return SignatureError{errctx.NewTextError(
+		msg,
 		1,
-		ierrors.WithStatusCode(http.StatusForbidden),
-		ierrors.WithPublicMessage("Forbidden"),
-		ierrors.WithShouldReport(false),
-	)
+		errctx.WithStatusCode(http.StatusForbidden),
+		errctx.WithPublicMessage("Forbidden"),
+		errctx.WithShouldReport(false),
+		errctx.WithDocsURL("https://docs.imgproxy.net/usage/signing_url"),
+	)}
 }
 
-func (e SignatureError) Error() string { return string(e) }
+func newMalformedSignatureError(ctx context.Context) error {
+	msg := "The signature appears to be a processing option. The signature section should always be present in the URL."
 
-func newFileSizeError() error {
-	return ierrors.Wrap(
-		FileSizeError{},
+	return SignatureError{errctx.NewTextError(
+		msg,
 		1,
-		ierrors.WithStatusCode(http.StatusUnprocessableEntity),
-		ierrors.WithPublicMessage("Invalid source image"),
-		ierrors.WithShouldReport(false),
-	)
+		errctx.WithStatusCode(http.StatusForbidden),
+		errctx.WithPublicMessage(msg),
+		errctx.WithShouldReport(false),
+		errctx.WithDocsURL(errctx.DocsBaseURL(ctx, "https://docs.imgproxy.net/usage/processing")),
+	)}
 }
-
-func (e FileSizeError) Error() string { return "Source image file is too big" }
 
 func newImageResolutionError(msg string) error {
-	return ierrors.Wrap(
-		ImageResolutionError(msg),
+	return ImageResolutionError{errctx.NewTextError(
+		msg,
 		1,
-		ierrors.WithStatusCode(http.StatusUnprocessableEntity),
-		ierrors.WithPublicMessage("Invalid source image"),
-		ierrors.WithShouldReport(false),
-	)
+		errctx.WithStatusCode(http.StatusUnprocessableEntity),
+		errctx.WithPublicMessage("Invalid source image"),
+		errctx.WithShouldReport(false),
+		errctx.WithDocsURL("https://docs.imgproxy.net/configuration/options#security"),
+	)}
 }
-
-func (e ImageResolutionError) Error() string { return string(e) }
-
-func newSecurityOptionsError() error {
-	return ierrors.Wrap(
-		SecurityOptionsError{},
-		1,
-		ierrors.WithStatusCode(http.StatusForbidden),
-		ierrors.WithPublicMessage("Invalid URL"),
-		ierrors.WithShouldReport(false),
-	)
-}
-
-func (e SecurityOptionsError) Error() string { return "Security processing options are not allowed" }
 
 func newSourceURLError(imageURL string) error {
-	return ierrors.Wrap(
-		SourceURLError(fmt.Sprintf("Source URL is not allowed: %s", imageURL)),
+	return SourceURLError{errctx.NewTextError(
+		fmt.Sprintf("Source URL is not allowed: %s", imageURL),
 		1,
-		ierrors.WithStatusCode(http.StatusNotFound),
-		ierrors.WithPublicMessage("Invalid source URL"),
-		ierrors.WithShouldReport(false),
-	)
+		errctx.WithStatusCode(http.StatusNotFound),
+		errctx.WithPublicMessage("Invalid source URL"),
+		errctx.WithShouldReport(false),
+		errctx.WithDocsURL("https://docs.imgproxy.net/configuration/options#IMGPROXY_ALLOWED_SOURCES"),
+	)}
 }
-
-func (e SourceURLError) Error() string { return string(e) }
-
-func newSourceAddressError(msg string) error {
-	return ierrors.Wrap(
-		SourceAddressError(msg),
-		1,
-		ierrors.WithStatusCode(http.StatusNotFound),
-		ierrors.WithPublicMessage("Invalid source URL"),
-		ierrors.WithShouldReport(false),
-	)
-}
-
-func (e SourceAddressError) Error() string { return string(e) }

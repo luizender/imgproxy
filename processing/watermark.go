@@ -4,81 +4,96 @@ import (
 	"context"
 	"math"
 
-	"github.com/imgproxy/imgproxy/v3/config"
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/imath"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/security"
-	"github.com/imgproxy/imgproxy/v3/vips"
+	"github.com/imgproxy/imgproxy/v4/imagedata"
+	"github.com/imgproxy/imgproxy/v4/imath"
+	"github.com/imgproxy/imgproxy/v4/options"
+	"github.com/imgproxy/imgproxy/v4/options/keys"
+	"github.com/imgproxy/imgproxy/v4/vips"
 )
 
-var watermarkPipeline = pipeline{
-	prepare,
-	scaleOnLoad,
-	importColorProfile,
-	scale,
-	rotateAndFlip,
-	padding,
+// watermarkPipeline constructs the watermark processing pipeline.
+// This pipeline is applied to the watermark image.
+func (p *Processor) watermarkPipeline() Pipeline {
+	return Pipeline{
+		p.vectorGuardScale,
+		p.scaleOnLoad,
+		p.colorspaceToProcessing,
+		p.scale,
+		p.rotateAndFlip,
+		p.padding,
+	}
 }
 
-func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, imgWidth, imgHeight int, offsetScale float64, framesCount int) error {
-	if len(opts.ImageURL) > 0 {
-		var err error
-		if wmData, err = imagedata.Download(context.Background(), opts.ImageURL, "watermark_url", imagedata.DownloadOptions{Header: nil, CookieJar: nil}, security.DefaultOptions()); err != nil {
-			return err
-		}
-	}
-	if err := wm.Load(wmData, 1, 1.0, 1); err != nil {
+func shouldReplicateWatermark(gt GravityType) bool {
+	return gt == GravityReplicate
+}
+
+func (p *Processor) prepareWatermark(
+	ctx context.Context,
+	wm *vips.Image,
+	wmData imagedata.ImageData,
+	po ProcessingOptions,
+	imgWidth, imgHeight int,
+	offsetScale float64,
+	framesCount int, //nolint:unparam
+) error {
+	if err := wm.Load(wmData, 1.0, 0, 1); err != nil {
 		return err
 	}
 
-	po := options.NewProcessingOptions()
-	po.ResizingType = options.ResizeFit
-	po.Dpr = 1
-	po.Enlarge = true
-	po.Format = wmData.Type
-
-	if opts.Scale > 0 {
-		po.Width = imath.Max(imath.ScaleToEven(imgWidth, opts.Scale), 1)
-		po.Height = imath.Max(imath.ScaleToEven(imgHeight, opts.Scale), 1)
-	}
-
-	if opts.ShouldReplicate() {
-		var offX, offY int
-
-		if math.Abs(opts.Position.X) >= 1.0 {
-			offX = imath.RoundToEven(opts.Position.X * offsetScale)
-		} else {
-			offX = imath.ScaleToEven(imgWidth, opts.Position.X)
-		}
-
-		if math.Abs(opts.Position.Y) >= 1.0 {
-			offY = imath.RoundToEven(opts.Position.Y * offsetScale)
-		} else {
-			offY = imath.ScaleToEven(imgHeight, opts.Position.Y)
-		}
-
-		po.Padding.Enabled = true
-		po.Padding.Left = offX / 2
-		po.Padding.Right = offX - po.Padding.Left
-		po.Padding.Top = offY / 2
-		po.Padding.Bottom = offY - po.Padding.Top
-	}
-
-	if err := watermarkPipeline.Run(context.Background(), wm, po, wmData); err != nil {
+	_, _, err := p.checkImageSize(wm, wmData.Format(), po)
+	if err != nil {
 		return err
 	}
 
-	if opts.ShouldReplicate() || framesCount > 1 {
-		// We need to copy image if we're going to replicate.
-		// Replication requires image to be read several times, and this requires
-		// random access to pixels
-		if err := wm.CopyMemory(); err != nil {
-			return err
-		}
+	wmPo := p.NewProcessingOptions(options.New())
+	wmPo.Set(keys.ResizingType, ResizeFit)
+	wmPo.Set(keys.Dpr, 1)
+	wmPo.Set(keys.Enlarge, true)
+	wmPo.Set(keys.Format, wmData.Format())
+
+	if scale := po.WatermarkScale(); scale > 0 {
+		wmPo.Set(keys.Width, max(imath.ScaleToEven(imgWidth, scale), 1))
+		wmPo.Set(keys.Height, max(imath.ScaleToEven(imgHeight, scale), 1))
 	}
 
-	if opts.ShouldReplicate() {
+	shouldReplicate := shouldReplicateWatermark(po.WatermarkPosition())
+
+	if shouldReplicate {
+		offsetX := po.WatermarkXOffset()
+		offsetY := po.WatermarkYOffset()
+
+		var padX, padY int
+
+		if math.Abs(offsetX) >= 1.0 {
+			padX = imath.RoundToEven(offsetX * offsetScale)
+		} else {
+			padX = imath.ScaleToEven(imgWidth, offsetX)
+		}
+
+		if math.Abs(offsetY) >= 1.0 {
+			padY = imath.RoundToEven(offsetY * offsetScale)
+		} else {
+			padY = imath.ScaleToEven(imgHeight, offsetY)
+		}
+
+		wmPo.Set(keys.PaddingLeft, padX/2)
+		wmPo.Set(keys.PaddingRight, padX-padX/2)
+		wmPo.Set(keys.PaddingTop, padY/2)
+		wmPo.Set(keys.PaddingBottom, padY-padY/2)
+	}
+
+	if err := p.watermarkPipeline().Run(ctx, wm, wmPo, wmData); err != nil {
+		return err
+	}
+
+	// We need to copy the image to ensure that it is in memory since we will
+	// close it after watermark processing is done.
+	if err := wm.CopyMemory(); err != nil {
+		return err
+	}
+
+	if shouldReplicate {
 		if err := wm.Replicate(imgWidth, imgHeight, true); err != nil {
 			return err
 		}
@@ -88,7 +103,38 @@ func prepareWatermark(wm *vips.Image, wmData *imagedata.ImageData, opts *options
 	return wm.StripAll()
 }
 
-func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.WatermarkOptions, offsetScale float64, framesCount int) error {
+func (p *Processor) applyWatermark(
+	ctx context.Context,
+	img *vips.Image,
+	po ProcessingOptions,
+	offsetScale float64,
+	framesCount int,
+) error {
+	var wmData imagedata.ImageData
+
+	if imageURL := po.WatermarkImageURL(); imageURL != "" {
+		var err error
+		wmData, _, err = p.imageDataFactory.DownloadSync(ctx, imageURL, "watermark_url", imagedata.DownloadOptions{})
+		if err != nil {
+			return err
+		}
+		defer wmData.Close()
+	} else {
+		if p.watermarkProvider == nil {
+			return nil
+		}
+
+		var err error
+		wmData, _, err = p.watermarkProvider.Get(ctx, po.Options)
+		if err != nil {
+			return err
+		}
+		if wmData == nil {
+			return nil
+		}
+		defer wmData.Close()
+	}
+
 	wm := new(vips.Image)
 	defer wm.Clear()
 
@@ -96,25 +142,20 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 	height := img.Height()
 	frameHeight := height / framesCount
 
-	if err := prepareWatermark(wm, wmData, opts, width, frameHeight, offsetScale, framesCount); err != nil {
+	if err := p.prepareWatermark(
+		ctx, wm, wmData, po, width, frameHeight, offsetScale, framesCount,
+	); err != nil {
 		return err
 	}
 
-	if !img.ColourProfileImported() {
-		if err := img.ImportColourProfile(); err != nil {
-			return err
-		}
-	}
+	opacity := po.WatermarkOpacity() * p.config.WatermarkOpacity
 
-	if err := img.RgbColourspace(); err != nil {
-		return err
-	}
-
-	opacity := opts.Opacity * config.WatermarkOpacity
+	position := po.WatermarkPosition()
+	shouldReplicate := shouldReplicateWatermark(position)
 
 	// If we replicated the watermark and need to apply it to an animated image,
 	// it is faster to replicate the watermark to all the image and apply it single-pass
-	if opts.ShouldReplicate() && framesCount > 1 {
+	if shouldReplicate && framesCount > 1 {
 		if err := wm.Replicate(width, height, false); err != nil {
 			return err
 		}
@@ -126,8 +167,13 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 	wmWidth := wm.Width()
 	wmHeight := wm.Height()
 
-	if !opts.ShouldReplicate() {
-		left, top = calcPosition(width, frameHeight, wmWidth, wmHeight, &opts.Position, offsetScale, true)
+	if !shouldReplicate {
+		gr := GravityOptions{
+			Type: position,
+			X:    po.WatermarkXOffset(),
+			Y:    po.WatermarkYOffset(),
+		}
+		left, top = calcPosition(width, frameHeight, wmWidth, wmHeight, &gr, offsetScale, true)
 	}
 
 	if left >= width || top >= height || -left >= wmWidth || -top >= wmHeight {
@@ -159,7 +205,7 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 		}
 	}
 
-	for i := 0; i < framesCount; i++ {
+	for range framesCount {
 		if err := img.ApplyWatermark(wm, left, top, opacity); err != nil {
 			return err
 		}
@@ -169,10 +215,11 @@ func applyWatermark(img *vips.Image, wmData *imagedata.ImageData, opts *options.
 	return nil
 }
 
-func watermark(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if !po.Watermark.Enabled || (len(po.Watermark.ImageURL) == 0 && imagedata.Watermark == nil) {
+func (p *Processor) watermark(c *Context) error {
+	hasURLWatermark := c.PO.WatermarkImageURL() != ""
+	if (p.watermarkProvider == nil && !hasURLWatermark) || c.PO.WatermarkOpacity() == 0 {
 		return nil
 	}
 
-	return applyWatermark(img, imagedata.Watermark, &po.Watermark, pctx.dprScale, 1)
+	return p.applyWatermark(c.Ctx, c.Img, c.PO, c.DprScale, 1)
 }

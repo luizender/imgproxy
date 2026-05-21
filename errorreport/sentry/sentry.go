@@ -5,34 +5,45 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-
-	"github.com/imgproxy/imgproxy/v3/config"
+	"github.com/imgproxy/imgproxy/v4/errctx"
 )
 
-var (
-	enabled bool
-
-	timeout = 5 * time.Second
+const (
+	// flushTimeout is the maximum time to wait for Sentry to send events
+	flushTimeout = 5 * time.Second
 )
 
-func Init() {
-	if len(config.SentryDSN) > 0 {
-		sentry.Init(sentry.ClientOptions{
-			Dsn:         config.SentryDSN,
-			Release:     config.SentryRelease,
-			Environment: config.SentryEnvironment,
-		})
-
-		enabled = true
-	}
+// reporter is a Sentry error reporter
+type reporter struct {
+	hub *sentry.Hub
 }
 
-func Report(err error, req *http.Request, meta map[string]any) {
-	if !enabled {
-		return
+// New creates and configures a new Sentry reporter
+func New(config *Config) (*reporter, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
 	}
 
-	hub := sentry.CurrentHub().Clone()
+	if len(config.DSN) == 0 {
+		return nil, nil
+	}
+
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn:         config.DSN,
+		Release:     config.Release,
+		Environment: config.Environment,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	hub := sentry.NewHub(client, sentry.NewScope())
+
+	return &reporter{hub: hub}, nil
+}
+
+func (r *reporter) Report(err errctx.Error, req *http.Request, meta map[string]any) {
+	hub := r.hub.Clone()
 	hub.Scope().SetRequest(req)
 	hub.Scope().SetLevel(sentry.LevelError)
 
@@ -40,22 +51,19 @@ func Report(err error, req *http.Request, meta map[string]any) {
 		hub.Scope().SetContext("Processing context", meta)
 	}
 
-	// imgproxy wraps almost all errors into *ierrors.Error, so Sentry will show
-	// the same error type for all errors. We need to fix it.
+	// imgproxy may wrap errors using errctx.WrappedError to add context, so Sentry
+	// would report the error type as *errctx.WrappedError.
 	//
-	// Instead of using hub.CaptureException(err), we need to create an event
-	// manually and replace `*ierrors.Error` with the wrapped error type
-	// (which is the previous exception type in the exception chain).
+	// To avoid this, we create the event manually from the original error
+	// and set the correct error type.
 	if event := hub.Client().EventFromException(err, sentry.LevelError); event != nil {
-		for i := 1; i < len(event.Exception); i++ {
-			if event.Exception[i].Type == "*ierrors.Error" {
-				event.Exception[i].Type = event.Exception[i-1].Type
-			}
-		}
-
-		eventID := hub.CaptureEvent(event)
-		if eventID != nil {
-			hub.Flush(timeout)
-		}
+		// Sentry reports errors in the reverse order: the last one is the outermost error.
+		// So we need to set the type on the last exception.
+		event.Exception[len(event.Exception)-1].Type = errctx.ErrorType(err)
+		hub.CaptureEvent(event)
 	}
+}
+
+func (r *reporter) Close() {
+	r.hub.Flush(flushTimeout)
 }

@@ -1,20 +1,40 @@
 package processing
 
-import (
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
-)
-
-func scale(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if pctx.wscale == 1 && pctx.hscale == 1 {
+func (p *Processor) scale(c *Context) error {
+	if c.WScale == 1 && c.HScale == 1 {
 		return nil
 	}
 
-	wscale, hscale := pctx.wscale, pctx.hscale
-	if (pctx.angle+po.Rotate)%180 == 90 {
+	wscale, hscale := c.WScale, c.HScale
+
+	if (c.Angle+c.PO.Rotate())%180 == 90 {
 		wscale, hscale = hscale, wscale
 	}
 
-	return img.Resize(wscale, hscale)
+	// Save current colorspace
+	cs := c.Img.Type()
+
+	// Convert to linear colorspace if needed
+	if p.config.UseLinearColorspace {
+		// We need this to keep colors consistent after processing
+		if err := c.Img.ImportColourProfile(); err != nil {
+			return err
+		}
+
+		// Convert to linear colorspace
+		if err := c.Img.LinearColourspace(); err != nil {
+			return err
+		}
+	}
+
+	if err := c.Img.Resize(wscale, hscale); err != nil {
+		return err
+	}
+
+	// Convert back to original colorspace if we used linear during processing
+	if p.config.UseLinearColorspace {
+		return c.Img.Colorspace(cs)
+	}
+
+	return nil
 }

@@ -1,6 +1,4 @@
 //go:build (linux || darwin) && go1.11
-// +build linux darwin
-// +build go1.11
 
 package reuseport
 
@@ -10,12 +8,10 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/imgproxy/imgproxy/v3/config"
 )
 
-func Listen(network, address string) (net.Listener, error) {
-	if !config.SoReuseport {
+func Listen(network, address string, reuse bool) (net.Listener, error) {
+	if !reuse {
 		return net.Listen(network, address)
 	}
 
@@ -23,7 +19,7 @@ func Listen(network, address string) (net.Listener, error) {
 		Control: func(_, _ string, c syscall.RawConn) error {
 			var cerr error
 			err := c.Control(func(fd uintptr) {
-				cerr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+				cerr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1) //nolint:gosec
 			})
 			if err != nil {
 				return err

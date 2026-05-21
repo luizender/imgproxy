@@ -3,12 +3,17 @@ package processing
 import (
 	"math"
 
-	"github.com/imgproxy/imgproxy/v3/imath"
-	"github.com/imgproxy/imgproxy/v3/options"
+	"github.com/imgproxy/imgproxy/v4/imath"
 )
 
-func calcPosition(width, height, innerWidth, innerHeight int, gravity *options.GravityOptions, dpr float64, allowOverflow bool) (left, top int) {
-	if gravity.Type == options.GravityFocusPoint {
+func calcPosition(
+	width, height, innerWidth, innerHeight int,
+	gravity *GravityOptions, dpr float64, allowOverflow bool,
+) (int, int) {
+	var left, top int
+	var minX, maxX, minY, maxY int
+
+	if gravity.Type == GravityFocusPoint {
 		pointX := imath.ScaleToEven(width, gravity.X)
 		pointY := imath.ScaleToEven(height, gravity.Y)
 
@@ -32,24 +37,22 @@ func calcPosition(width, height, innerWidth, innerHeight int, gravity *options.G
 		left = imath.ShrinkToEven(width-innerWidth+1, 2) + offX
 		top = imath.ShrinkToEven(height-innerHeight+1, 2) + offY
 
-		if gravity.Type == options.GravityNorth || gravity.Type == options.GravityNorthEast || gravity.Type == options.GravityNorthWest {
+		if gravity.Type == GravityNorth || gravity.Type == GravityNorthEast || gravity.Type == GravityNorthWest {
 			top = 0 + offY
 		}
 
-		if gravity.Type == options.GravityEast || gravity.Type == options.GravityNorthEast || gravity.Type == options.GravitySouthEast {
+		if gravity.Type == GravityEast || gravity.Type == GravityNorthEast || gravity.Type == GravitySouthEast {
 			left = width - innerWidth - offX
 		}
 
-		if gravity.Type == options.GravitySouth || gravity.Type == options.GravitySouthEast || gravity.Type == options.GravitySouthWest {
+		if gravity.Type == GravitySouth || gravity.Type == GravitySouthEast || gravity.Type == GravitySouthWest {
 			top = height - innerHeight - offY
 		}
 
-		if gravity.Type == options.GravityWest || gravity.Type == options.GravityNorthWest || gravity.Type == options.GravitySouthWest {
+		if gravity.Type == GravityWest || gravity.Type == GravityNorthWest || gravity.Type == GravitySouthWest {
 			left = 0 + offX
 		}
 	}
-
-	var minX, maxX, minY, maxY int
 
 	if allowOverflow {
 		minX, maxX = -innerWidth+1, width-1
@@ -59,8 +62,8 @@ func calcPosition(width, height, innerWidth, innerHeight int, gravity *options.G
 		minY, maxY = 0, height-innerHeight
 	}
 
-	left = imath.Max(minX, imath.Min(left, maxX))
-	top = imath.Max(minY, imath.Min(top, maxY))
+	left = max(minX, min(left, maxX))
+	top = max(minY, min(top, maxY))
 
-	return
+	return left, top
 }
