@@ -2,20 +2,6 @@ package imath
 
 import "math"
 
-func Max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func Min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func MinNonZero(a, b int) int {
 	switch {
 	case a == 0:
@@ -24,7 +10,7 @@ func MinNonZero(a, b int) int {
 		return a
 	}
 
-	return Min(a, b)
+	return min(a, b)
 }
 
 func Round(a float64) int {
@@ -65,4 +51,11 @@ func ShrinkToEven(a int, shrink float64) int {
 	}
 
 	return RoundToEven(float64(a) / shrink)
+}
+
+func NonZero[T ~int | ~float32 | ~float64](a, b T) T {
+	if a != 0 {
+		return a
+	}
+	return b
 }

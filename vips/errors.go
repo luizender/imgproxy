@@ -1,32 +1,33 @@
 package vips
 
 import (
-	"fmt"
+	"net/http"
+	"regexp"
 
-	"github.com/imgproxy/imgproxy/v3/ierrors"
+	"github.com/imgproxy/imgproxy/v4/errctx"
 )
 
-type (
-	VipsError  string
-	ColorError string
-)
+var badImageErrRe = []*regexp.Regexp{
+	regexp.MustCompile(`^(\S+)load_source: `),
+	regexp.MustCompile(`^(\S+)2vips: `),
+	regexp.MustCompile(`^VipsJpeg: `),
+	regexp.MustCompile(`XML parse error: `),
+}
+
+type VipsError struct{ *errctx.TextError }
 
 func newVipsError(msg string) error {
-	return ierrors.Wrap(VipsError(msg), 1)
+	var opts []errctx.Option
+
+	for _, re := range badImageErrRe {
+		if re.MatchString(msg) {
+			opts = []errctx.Option{
+				errctx.WithStatusCode(http.StatusUnprocessableEntity),
+				errctx.WithPublicMessage("Broken or unsupported image"),
+			}
+			break
+		}
+	}
+
+	return VipsError{errctx.NewTextError(msg, 1, opts...)}
 }
-
-func newVipsErrorf(format string, args ...interface{}) error {
-	return ierrors.Wrap(VipsError(fmt.Sprintf(format, args...)), 1)
-}
-
-func (e VipsError) Error() string { return string(e) }
-
-func newColorError(format string, args ...interface{}) error {
-	return ierrors.Wrap(
-		ColorError(fmt.Sprintf(format, args...)),
-		1,
-		ierrors.WithShouldReport(false),
-	)
-}
-
-func (e ColorError) Error() string { return string(e) }

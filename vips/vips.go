@@ -5,32 +5,25 @@ package vips
 #cgo CFLAGS: -O3
 #cgo LDFLAGS: -lm
 #include "vips.h"
+#include "source.h"
 */
 import "C"
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"math"
-	"net/http"
 	"os"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
-	log "github.com/sirupsen/logrus"
-
-	"github.com/imgproxy/imgproxy/v3/config"
-	"github.com/imgproxy/imgproxy/v3/ierrors"
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/imagetype"
-	"github.com/imgproxy/imgproxy/v3/imath"
-	"github.com/imgproxy/imgproxy/v3/metrics/cloudwatch"
-	"github.com/imgproxy/imgproxy/v3/metrics/datadog"
-	"github.com/imgproxy/imgproxy/v3/metrics/newrelic"
-	"github.com/imgproxy/imgproxy/v3/metrics/otel"
-	"github.com/imgproxy/imgproxy/v3/metrics/prometheus"
+	"github.com/imgproxy/imgproxy/v4/imagedata"
+	"github.com/imgproxy/imgproxy/v4/imagetype"
+	"github.com/imgproxy/imgproxy/v4/options"
+	"github.com/imgproxy/imgproxy/v4/vips/color"
 )
 
 type Image struct {
@@ -42,35 +35,39 @@ var (
 	typeSupportSave sync.Map
 
 	gifResolutionLimit int
+
+	initOnce sync.Once
 )
 
-var vipsConf struct {
-	JpegProgressive       C.int
-	PngInterlaced         C.int
-	PngQuantize           C.int
-	PngQuantizationColors C.int
-	AvifSpeed             C.int
-	JxlEffort             C.int
-	WebpEffort            C.int
-	WebpPreset            C.VipsForeignWebpPreset
-	PngUnlimited          C.int
-	SvgUnlimited          C.int
+// Global vips config. Can be set with [Init]
+var config *Config
+
+func init() {
+	// Just get sure that we have some config
+	c := NewDefaultConfig()
+	config = &c
 }
 
-var badImageErrRe = []*regexp.Regexp{
-	regexp.MustCompile(`^(\S+)load_buffer: `),
-	regexp.MustCompile(`^(\S+)2vips: `),
-	regexp.MustCompile(`^VipsJpeg: `),
-	regexp.MustCompile(`XML parse error: `),
-}
+func Init(c *Config) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
 
-func Init() error {
+	config = c
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	if err := C.vips_initialize(); err != 0 {
-		C.vips_shutdown()
-		return newVipsError("unable to start vips!")
+	// vips_initialize must be called only once
+	var initErr error
+	initOnce.Do(func() {
+		if err := C.vips_initialize(); err != 0 {
+			C.vips_shutdown()
+			initErr = newVipsError("unable to start vips!")
+		}
+	})
+	if initErr != nil {
+		return initErr
 	}
 
 	// Disable libvips cache. Since processing pipeline is fine tuned, we won't get much profit from it.
@@ -82,110 +79,21 @@ func Init() error {
 		// Set vips concurrency level to GOMAXPROCS if we are running in AWS Lambda
 		// since each function processes only one request at a time
 		// so we can use all available CPU cores
-		C.vips_concurrency_set(C.int(imath.Max(1, runtime.GOMAXPROCS(0))))
+		C.vips_concurrency_set(C.int(max(1, runtime.GOMAXPROCS(0))))
 	} else {
 		C.vips_concurrency_set(1)
 	}
 
-	if len(os.Getenv("IMGPROXY_VIPS_LEAK_CHECK")) > 0 {
-		C.vips_leak_set(C.gboolean(1))
-	}
-
-	if len(os.Getenv("IMGPROXY_VIPS_CACHE_TRACE")) > 0 {
-		C.vips_cache_set_trace(C.gboolean(1))
-	}
+	C.vips_leak_set(gbool(config.LeakCheck))
+	C.vips_cache_set_trace(gbool(config.CacheTrace))
 
 	gifResolutionLimit = int(C.gif_resolution_limit())
-
-	vipsConf.JpegProgressive = gbool(config.JpegProgressive)
-	vipsConf.PngInterlaced = gbool(config.PngInterlaced)
-	vipsConf.PngQuantize = gbool(config.PngQuantize)
-	vipsConf.PngQuantizationColors = C.int(config.PngQuantizationColors)
-	vipsConf.AvifSpeed = C.int(config.AvifSpeed)
-	vipsConf.JxlEffort = C.int(config.JxlEffort)
-	vipsConf.WebpEffort = C.int(config.WebpEffort)
-	vipsConf.PngUnlimited = gbool(config.PngUnlimited)
-	vipsConf.SvgUnlimited = gbool(config.SvgUnlimited)
-
-	switch config.WebpPreset {
-	case config.WebpPresetPhoto:
-		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_PHOTO
-	case config.WebpPresetPicture:
-		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_PICTURE
-	case config.WebpPresetDrawing:
-		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_DRAWING
-	case config.WebpPresetIcon:
-		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_ICON
-	case config.WebpPresetText:
-		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_TEXT
-	default:
-		vipsConf.WebpPreset = C.VIPS_FOREIGN_WEBP_PRESET_DEFAULT
-	}
-
-	prometheus.AddGaugeFunc(
-		"vips_memory_bytes",
-		"A gauge of the vips tracked memory usage in bytes.",
-		GetMem,
-	)
-	prometheus.AddGaugeFunc(
-		"vips_max_memory_bytes",
-		"A gauge of the max vips tracked memory usage in bytes.",
-		GetMemHighwater,
-	)
-	prometheus.AddGaugeFunc(
-		"vips_allocs",
-		"A gauge of the number of active vips allocations.",
-		GetAllocs,
-	)
-
-	datadog.AddGaugeFunc("vips.memory", GetMem)
-	datadog.AddGaugeFunc("vips.max_memory", GetMemHighwater)
-	datadog.AddGaugeFunc("vips.allocs", GetAllocs)
-
-	newrelic.AddGaugeFunc("vips.memory", GetMem)
-	newrelic.AddGaugeFunc("vips.max_memory", GetMemHighwater)
-	newrelic.AddGaugeFunc("vips.allocs", GetAllocs)
-
-	otel.AddGaugeFunc(
-		"vips_memory_bytes",
-		"A gauge of the vips tracked memory usage in bytes.",
-		"By",
-		GetMem,
-	)
-	otel.AddGaugeFunc(
-		"vips_max_memory_bytes",
-		"A gauge of the max vips tracked memory usage in bytes.",
-		"By",
-		GetMemHighwater,
-	)
-	otel.AddGaugeFunc(
-		"vips_allocs",
-		"A gauge of the number of active vips allocations.",
-		"1",
-		GetAllocs,
-	)
-
-	cloudwatch.AddGaugeFunc("VipsMemory", "Bytes", GetMem)
-	cloudwatch.AddGaugeFunc("VipsMaxMemory", "Bytes", GetMemHighwater)
-	cloudwatch.AddGaugeFunc("VipsAllocs", "Count", GetAllocs)
 
 	return nil
 }
 
 func Shutdown() {
 	C.vips_shutdown()
-}
-
-func GetMem() float64 {
-	return float64(C.vips_tracked_get_mem())
-}
-
-func GetMemHighwater() float64 {
-	return float64(C.vips_tracked_get_mem_highwater())
-}
-
-func GetAllocs() float64 {
-	return float64(C.vips_tracked_get_allocs())
 }
 
 func Health() error {
@@ -225,19 +133,7 @@ func Error() error {
 	defer C.vips_error_clear()
 
 	errstr := strings.TrimSpace(C.GoString(C.vips_error_buffer()))
-	err := newVipsError(errstr)
-
-	for _, re := range badImageErrRe {
-		if re.MatchString(errstr) {
-			return ierrors.Wrap(
-				err, 0,
-				ierrors.WithStatusCode(http.StatusUnprocessableEntity),
-				ierrors.WithPublicMessage("Broken or unsupported image"),
-			)
-		}
-	}
-
-	return err
+	return newVipsError(errstr)
 }
 
 func hasOperation(name string) bool {
@@ -246,30 +142,32 @@ func hasOperation(name string) bool {
 
 func SupportsLoad(it imagetype.Type) bool {
 	if sup, ok := typeSupportLoad.Load(it); ok {
-		return sup.(bool)
+		return sup.(bool) //nolint:forcetypeassert
 	}
 
 	sup := false
 
 	switch it {
 	case imagetype.JPEG:
-		sup = hasOperation("jpegload_buffer")
+		sup = hasOperation("jpegload_source")
 	case imagetype.JXL:
-		sup = hasOperation("jxlload_buffer")
+		sup = hasOperation("jxlload_source")
 	case imagetype.PNG:
-		sup = hasOperation("pngload_buffer")
+		sup = hasOperation("pngload_source")
 	case imagetype.WEBP:
-		sup = hasOperation("webpload_buffer")
+		sup = hasOperation("webpload_source")
 	case imagetype.GIF:
-		sup = hasOperation("gifload_buffer")
-	case imagetype.ICO, imagetype.BMP:
-		sup = true
+		sup = hasOperation("gifload_source")
+	case imagetype.BMP:
+		sup = hasOperation("bmpload_source")
+	case imagetype.ICO:
+		sup = hasOperation("icoload_source")
 	case imagetype.SVG:
-		sup = hasOperation("svgload_buffer")
+		sup = hasOperation("svgload_source")
 	case imagetype.HEIC, imagetype.AVIF:
-		sup = hasOperation("heifload_buffer")
+		sup = hasOperation("heifload_source")
 	case imagetype.TIFF:
-		sup = hasOperation("tiffload_buffer")
+		sup = hasOperation("tiffload_source")
 	}
 
 	typeSupportLoad.Store(it, sup)
@@ -279,28 +177,30 @@ func SupportsLoad(it imagetype.Type) bool {
 
 func SupportsSave(it imagetype.Type) bool {
 	if sup, ok := typeSupportSave.Load(it); ok {
-		return sup.(bool)
+		return sup.(bool) //nolint:forcetypeassert
 	}
 
 	sup := false
 
 	switch it {
 	case imagetype.JPEG:
-		sup = hasOperation("jpegsave_buffer")
+		sup = hasOperation("jpegsave_target")
 	case imagetype.JXL:
-		sup = hasOperation("jxlsave_buffer")
-	case imagetype.PNG, imagetype.ICO:
-		sup = hasOperation("pngsave_buffer")
+		sup = hasOperation("jxlsave_target")
+	case imagetype.PNG:
+		sup = hasOperation("pngsave_target")
 	case imagetype.WEBP:
-		sup = hasOperation("webpsave_buffer")
+		sup = hasOperation("webpsave_target")
 	case imagetype.GIF:
-		sup = hasOperation("gifsave_buffer")
+		sup = hasOperation("gifsave_target")
 	case imagetype.HEIC, imagetype.AVIF:
-		sup = hasOperation("heifsave_buffer")
+		sup = hasOperation("heifsave_target")
 	case imagetype.BMP:
-		sup = true
+		sup = hasOperation("bmpsave_target")
 	case imagetype.TIFF:
-		sup = hasOperation("tiffsave_buffer")
+		sup = hasOperation("tiffsave_target")
+	case imagetype.ICO:
+		sup = hasOperation("icosave_target")
 	}
 
 	typeSupportSave.Store(it, sup)
@@ -319,23 +219,12 @@ func gbool(b bool) C.gboolean {
 	return C.gboolean(0)
 }
 
-func cRGB(c Color) C.RGB {
+func cRGB(c color.RGB) C.RGB {
 	return C.RGB{
 		r: C.double(c.R),
 		g: C.double(c.G),
 		b: C.double(c.B),
 	}
-}
-
-func ptrToBytes(ptr unsafe.Pointer, size int) []byte {
-	return (*[math.MaxInt32]byte)(ptr)[:int(size):int(size)]
-}
-
-func (img *Image) swapAndUnref(newImg *C.VipsImage) {
-	if img.VipsImage != nil {
-		C.unref_image(img.VipsImage)
-	}
-	img.VipsImage = newImg
 }
 
 func (img *Image) Width() int {
@@ -350,6 +239,10 @@ func (img *Image) PageHeight() int {
 	return int(C.vips_image_get_page_height(img.VipsImage))
 }
 
+// Pages returns number of pages in the image file.
+//
+// WARNING: It's not the number of pages in the loaded image.
+// Use [Image.PagesLoaded] for that.
 func (img *Image) Pages() int {
 	p, err := img.GetIntDefault("n-pages", 1)
 	if err != nil {
@@ -358,38 +251,46 @@ func (img *Image) Pages() int {
 	return p
 }
 
-func (img *Image) Load(imgdata *imagedata.ImageData, shrink int, scale float64, pages int) error {
-	if imgdata.Type == imagetype.ICO {
-		return img.loadIco(imgdata.Data, shrink, scale, pages)
-	}
+// PagesLoaded returns number of pages in the loaded image.
+func (img *Image) PagesLoaded() int {
+	return img.Height() / img.PageHeight()
+}
 
-	if imgdata.Type == imagetype.BMP {
-		return img.loadBmp(imgdata.Data, true)
-	}
-
+func (img *Image) Load(
+	imgdata imagedata.ImageData,
+	shrink float64,
+	page, pages int,
+) error {
 	var tmp *C.VipsImage
 
-	data := unsafe.Pointer(&imgdata.Data[0])
-	dataSize := C.size_t(len(imgdata.Data))
-	err := C.int(0)
+	source := newVipsImgproxySource(imgdata.Reader())
+	defer C.unref_imgproxy_source(source)
 
-	switch imgdata.Type {
+	lo := newLoadOptions(shrink, page, pages)
+
+	err := C.int(0) //nolint:wastedassign
+
+	switch imgdata.Format() {
 	case imagetype.JPEG:
-		err = C.vips_jpegload_go(data, dataSize, C.int(shrink), &tmp)
+		err = C.vips_jpegload_source_go(source, &tmp, lo)
 	case imagetype.JXL:
-		err = C.vips_jxlload_go(data, dataSize, C.int(pages), &tmp)
+		err = C.vips_jxlload_source_go(source, &tmp, lo)
 	case imagetype.PNG:
-		err = C.vips_pngload_go(data, dataSize, &tmp, vipsConf.PngUnlimited)
+		err = C.vips_pngload_source_go(source, &tmp, lo)
 	case imagetype.WEBP:
-		err = C.vips_webpload_go(data, dataSize, C.double(scale), C.int(pages), &tmp)
+		err = C.vips_webpload_source_go(source, &tmp, lo)
 	case imagetype.GIF:
-		err = C.vips_gifload_go(data, dataSize, C.int(pages), &tmp)
+		err = C.vips_gifload_source_go(source, &tmp, lo)
 	case imagetype.SVG:
-		err = C.vips_svgload_go(data, dataSize, C.double(scale), &tmp, vipsConf.SvgUnlimited)
+		err = C.vips_svgload_source_go(source, &tmp, lo)
 	case imagetype.HEIC, imagetype.AVIF:
-		err = C.vips_heifload_go(data, dataSize, &tmp, C.int(0))
+		err = C.vips_heifload_source_go(source, &tmp, lo)
 	case imagetype.TIFF:
-		err = C.vips_tiffload_go(data, dataSize, &tmp)
+		err = C.vips_tiffload_source_go(source, &tmp, lo)
+	case imagetype.BMP:
+		err = C.vips_bmpload_source_go(source, &tmp, lo)
+	case imagetype.ICO:
+		err = C.vips_icoload_source_go(source, &tmp, lo)
 	default:
 		return newVipsError("Usupported image type to load")
 	}
@@ -399,28 +300,31 @@ func (img *Image) Load(imgdata *imagedata.ImageData, shrink int, scale float64, 
 
 	img.swapAndUnref(tmp)
 
-	if imgdata.Type == imagetype.TIFF {
+	if imgdata.Format() == imagetype.TIFF {
 		if C.vips_fix_float_tiff(img.VipsImage, &tmp) == 0 {
 			img.swapAndUnref(tmp)
 		} else {
-			log.Warnf("Can't fix TIFF: %s", Error())
+			slog.Warn("Can't fix TIFF", "error", Error())
 		}
 	}
 
 	return nil
 }
 
-func (img *Image) LoadThumbnail(imgdata *imagedata.ImageData) error {
-	if imgdata.Type != imagetype.HEIC && imgdata.Type != imagetype.AVIF {
+func (img *Image) LoadThumbnail(imgdata imagedata.ImageData) error {
+	if imgdata.Format() != imagetype.HEIC && imgdata.Format() != imagetype.AVIF {
 		return newVipsError("Usupported image type to load thumbnail")
 	}
 
 	var tmp *C.VipsImage
 
-	data := unsafe.Pointer(&imgdata.Data[0])
-	dataSize := C.size_t(len(imgdata.Data))
+	source := newVipsImgproxySource(imgdata.Reader())
+	defer C.unref_imgproxy_source(source)
 
-	if err := C.vips_heifload_go(data, dataSize, &tmp, C.int(1)); err != 0 {
+	lo := newLoadOptions(1.0, 0, 1)
+	lo.Thumbnail = 1
+
+	if err := C.vips_heifload_source_go(source, &tmp, lo); err != 0 {
 		return Error()
 	}
 
@@ -429,41 +333,47 @@ func (img *Image) LoadThumbnail(imgdata *imagedata.ImageData) error {
 	return nil
 }
 
-func (img *Image) Save(imgtype imagetype.Type, quality int) (*imagedata.ImageData, error) {
-	if imgtype == imagetype.ICO {
-		return img.saveAsIco()
-	}
+func (img *Image) Save(
+	imgtype imagetype.Type,
+	quality int,
+	o *options.Options,
+) (imagedata.ImageData, error) {
+	target := C.vips_target_new_to_memory()
 
-	if imgtype == imagetype.BMP {
-		return img.saveAsBmp()
-	}
-
-	var ptr unsafe.Pointer
 	cancel := func() {
-		C.g_free_go(&ptr)
+		C.vips_unref_target(target)
 	}
 
-	err := C.int(0)
+	so := newSaveOptions(o)
+
+	err := C.int(0) //nolint:wastedassign
 	imgsize := C.size_t(0)
 
 	switch imgtype {
 	case imagetype.JPEG:
-		err = C.vips_jpegsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality), vipsConf.JpegProgressive)
+		err = C.vips_jpegsave_go(img.VipsImage, target, C.int(quality), so)
 	case imagetype.JXL:
-		err = C.vips_jxlsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality), vipsConf.JxlEffort)
+		err = C.vips_jxlsave_go(img.VipsImage, target, C.int(quality), so)
 	case imagetype.PNG:
-		err = C.vips_pngsave_go(img.VipsImage, &ptr, &imgsize, vipsConf.PngInterlaced, vipsConf.PngQuantize, vipsConf.PngQuantizationColors)
+		err = C.vips_pngsave_go(img.VipsImage, target, so)
 	case imagetype.WEBP:
-		err = C.vips_webpsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality), vipsConf.WebpEffort, vipsConf.WebpPreset)
+		err = C.vips_webpsave_go(img.VipsImage, target, C.int(quality), so)
 	case imagetype.GIF:
-		err = C.vips_gifsave_go(img.VipsImage, &ptr, &imgsize)
+		err = C.vips_gifsave_go(img.VipsImage, target, so)
 	case imagetype.HEIC:
-		err = C.vips_heifsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality))
+		err = C.vips_heifsave_go(img.VipsImage, target, C.int(quality), so)
 	case imagetype.AVIF:
-		err = C.vips_avifsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality), vipsConf.AvifSpeed)
+		err = C.vips_avifsave_go(img.VipsImage, target, C.int(quality), so)
 	case imagetype.TIFF:
-		err = C.vips_tiffsave_go(img.VipsImage, &ptr, &imgsize, C.int(quality))
+		err = C.vips_tiffsave_go(img.VipsImage, target, C.int(quality), so)
+	case imagetype.BMP:
+		err = C.vips_bmpsave_target_go(img.VipsImage, target, so)
+	case imagetype.ICO:
+		err = C.vips_icosave_target_go(img.VipsImage, target, so)
 	default:
+		// NOTE: probably, it would be better to use defer unref + additionally ref the target
+		// before passing it to the imagedata.ImageData
+		cancel()
 		return nil, newVipsError("Usupported image type to save")
 	}
 	if err != 0 {
@@ -471,14 +381,14 @@ func (img *Image) Save(imgtype imagetype.Type, quality int) (*imagedata.ImageDat
 		return nil, Error()
 	}
 
-	imgdata := imagedata.ImageData{
-		Type: imgtype,
-		Data: ptrToBytes(ptr, int(imgsize)),
-	}
+	var ptr = C.vips_blob_get(target.blob, &imgsize)
 
-	imgdata.SetCancel(cancel)
+	b := unsafe.Slice((*byte)(ptr), int(imgsize))
 
-	return &imgdata, nil
+	i := imagedata.NewFromBytesWithFormat(imgtype, b)
+	i.AddCancel(cancel)
+
+	return i, nil
 }
 
 func (img *Image) Clear() {
@@ -520,7 +430,22 @@ func (img *Image) Swap(in *Image) {
 }
 
 func (img *Image) IsAnimated() bool {
-	return C.vips_is_animated(img.VipsImage) > 0
+	return C.vips_image_is_animated(img.VipsImage) > 0
+}
+
+// RemoveAnimation removes all animation-related data from the image
+// making it a static image.
+//
+// It doesn't remove already loaded frames and keeps them vertically stacked.
+func (img *Image) RemoveAnimation() error {
+	var tmp *C.VipsImage
+
+	if C.vips_image_remove_animation(img.VipsImage, &tmp) != 0 {
+		return Error()
+	}
+
+	img.swapAndUnref(tmp)
+	return nil
 }
 
 func (img *Image) HasAlpha() bool {
@@ -752,7 +677,7 @@ func (img *Image) SmartCrop(width, height int) error {
 	return nil
 }
 
-func (img *Image) Trim(threshold float64, smart bool, color Color, equalHor bool, equalVer bool) error {
+func (img *Image) Trim(threshold float64, smart bool, color color.RGB, equalHor bool, equalVer bool) error {
 	var tmp *C.VipsImage
 
 	if err := img.CopyMemory(); err != nil {
@@ -768,7 +693,7 @@ func (img *Image) Trim(threshold float64, smart bool, color Color, equalHor bool
 	return nil
 }
 
-func (img *Image) Flatten(bg Color) error {
+func (img *Image) Flatten(bg color.RGB) error {
 	var tmp *C.VipsImage
 
 	if C.vips_flatten_go(img.VipsImage, &tmp, cRGB(bg)) != 0 {
@@ -779,7 +704,7 @@ func (img *Image) Flatten(bg Color) error {
 	return nil
 }
 
-func (img *Image) ApplyFilters(blurSigma, sharpSigma float32, pixelatePixels int) error {
+func (img *Image) ApplyFilters(blurSigma, sharpSigma float64, pixelatePixels int) error {
 	var tmp *C.VipsImage
 
 	if C.vips_apply_filters(img.VipsImage, &tmp, C.double(blurSigma), C.double(sharpSigma), C.int(pixelatePixels)) != 0 {
@@ -789,6 +714,16 @@ func (img *Image) ApplyFilters(blurSigma, sharpSigma float32, pixelatePixels int
 	img.swapAndUnref(tmp)
 
 	return nil
+}
+
+// Type returns the current colorspace interpretation of the image.
+func (img *Image) Type() Interpretation {
+	return Interpretation(img.VipsImage.Type)
+}
+
+// GuessInterpretation returns the guessed colorspace interpretation of the image.
+func (img *Image) GuessInterpretation() Interpretation {
+	return Interpretation(C.vips_image_guess_interpretation(img.VipsImage))
 }
 
 func (img *Image) IsRGB() bool {
@@ -808,7 +743,7 @@ func (img *Image) BackupColourProfile() {
 	if C.vips_icc_backup(img.VipsImage, &tmp) == 0 {
 		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't backup ICC profile: %s", Error())
+		slog.Warn("Can't backup ICC profile", "error", Error())
 	}
 }
 
@@ -818,7 +753,7 @@ func (img *Image) RestoreColourProfile() {
 	if C.vips_icc_restore(img.VipsImage, &tmp) == 0 {
 		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't restore ICC profile: %s", Error())
+		slog.Warn("Can't restore ICC profile", "error", Error())
 	}
 }
 
@@ -843,7 +778,7 @@ func (img *Image) ImportColourProfile() error {
 	if C.vips_icc_import_go(img.VipsImage, &tmp) == 0 {
 		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't import ICC profile: %s", Error())
+		slog.Warn("Can't import ICC profile", "error", Error())
 	}
 
 	return nil
@@ -865,30 +800,13 @@ func (img *Image) ExportColourProfile() error {
 	if C.vips_icc_export_go(img.VipsImage, &tmp) == 0 {
 		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't export ICC profile: %s", Error())
+		slog.Warn("Can't export ICC profile", "error", Error())
 	}
 
 	return nil
 }
 
-func (img *Image) ExportColourProfileToSRGB() error {
-	var tmp *C.VipsImage
-
-	// Don't export is there's no embedded profile or embedded profile is sRGB
-	if C.vips_has_embedded_icc(img.VipsImage) == 0 || C.vips_icc_is_srgb_iec61966(img.VipsImage) == 1 {
-		return nil
-	}
-
-	if C.vips_icc_export_srgb(img.VipsImage, &tmp) == 0 {
-		img.swapAndUnref(tmp)
-	} else {
-		log.Warningf("Can't export ICC profile: %s", Error())
-	}
-
-	return nil
-}
-
-func (img *Image) TransformColourProfileToSRGB() error {
+func (img *Image) TransformColourProfileToStandard() error {
 	var tmp *C.VipsImage
 
 	// Don't transform is there's no embedded profile or embedded profile is sRGB
@@ -898,10 +816,10 @@ func (img *Image) TransformColourProfileToSRGB() error {
 		return nil
 	}
 
-	if C.vips_icc_transform_srgb(img.VipsImage, &tmp) == 0 {
+	if C.vips_icc_transform_standard(img.VipsImage, &tmp) == 0 {
 		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't transform ICC profile to sRGB: %s", Error())
+		slog.Warn("Can't transform ICC profile", "error", Error())
 	}
 
 	return nil
@@ -913,7 +831,7 @@ func (img *Image) RemoveColourProfile() error {
 	if C.vips_icc_remove(img.VipsImage, &tmp) == 0 {
 		img.swapAndUnref(tmp)
 	} else {
-		log.Warningf("Can't remove ICC profile: %s", Error())
+		slog.Warn("Can't remove ICC profile", "error", Error())
 	}
 
 	return nil
@@ -927,15 +845,17 @@ func (img *Image) RgbColourspace() error {
 	return img.Colorspace(C.VIPS_INTERPRETATION_sRGB)
 }
 
-func (img *Image) Colorspace(colorspace C.VipsInterpretation) error {
-	if img.VipsImage.Type != colorspace {
-		var tmp *C.VipsImage
-
-		if C.vips_colourspace_go(img.VipsImage, &tmp, colorspace) != 0 {
-			return Error()
-		}
-		img.swapAndUnref(tmp)
+func (img *Image) Colorspace(colorspace Interpretation) error {
+	if img.Type() == colorspace {
+		return nil
 	}
+
+	var tmp *C.VipsImage
+
+	if C.vips_colourspace_go(img.VipsImage, &tmp, C.VipsInterpretation(colorspace)) != 0 {
+		return Error()
+	}
+	img.swapAndUnref(tmp)
 
 	return nil
 }
@@ -1002,4 +922,23 @@ func (img *Image) StripAll() error {
 	img.swapAndUnref(tmp)
 
 	return nil
+}
+
+func (img *Image) swapAndUnref(newImg *C.VipsImage) {
+	if img.VipsImage != nil {
+		C.unref_image(img.VipsImage)
+	}
+	img.VipsImage = newImg
+}
+
+func vipsError(fn string, msg string, args ...any) {
+	fnStr := C.CString(fn)
+	defer C.free(unsafe.Pointer(fnStr))
+
+	msg = fmt.Sprintf(msg, args...)
+
+	msgStr := C.CString(msg)
+	defer C.free(unsafe.Pointer(msgStr))
+
+	C.vips_error_go(fnStr, msgStr)
 }

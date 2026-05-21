@@ -1,27 +1,25 @@
 package processing
 
-import (
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
-)
+func (p *Processor) applyFilters(c *Context) error {
+	blur := c.PO.Blur()
+	sharpen := c.PO.Sharpen()
+	pixelate := c.PO.Pixelate()
 
-func applyFilters(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if po.Blur == 0 && po.Sharpen == 0 && po.Pixelate <= 1 {
+	if blur == 0 && sharpen == 0 && pixelate <= 1 {
 		return nil
 	}
 
-	if err := img.CopyMemory(); err != nil {
+	if err := c.Img.CopyMemory(); err != nil {
 		return err
 	}
 
-	if err := img.RgbColourspace(); err != nil {
+	if err := c.Img.RgbColourspace(); err != nil {
 		return err
 	}
 
-	if err := img.ApplyFilters(po.Blur, po.Sharpen, po.Pixelate); err != nil {
+	if err := c.Img.ApplyFilters(blur, sharpen, pixelate); err != nil {
 		return err
 	}
 
-	return img.CopyMemory()
+	return c.Img.CopyMemory()
 }

@@ -1,42 +1,63 @@
 package processing
 
 import (
-	"github.com/imgproxy/imgproxy/v3/config"
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
+	"github.com/imgproxy/imgproxy/v4/vips"
 )
 
-func colorspaceToProcessing(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if img.ColourProfileImported() {
-		return nil
-	}
-
-	if err := img.Rad2Float(); err != nil {
+func (p *Processor) colorspaceToProcessing(c *Context) error {
+	if err := c.Img.Rad2Float(); err != nil {
 		return err
 	}
 
-	convertToLinear := config.UseLinearColorspace && (pctx.wscale != 1 || pctx.hscale != 1)
+	supportsHDR := c.PO.Format().SupportsHDR() && c.PO.PreserveHDR()
+	cs := guessTargetColorspace(c.Img, supportsHDR)
 
-	if img.IsLinear() {
-		// The image is linear. If we keep its ICC, we'll get wrong colors after
-		// converting it to sRGB
-		img.RemoveColourProfile()
+	if c.Img.IsLinear() {
+		// If we keep its ICC, we'll get wrong colors after converting it to target
+		// colorspace (we never convert back to linear).
+		c.Img.RemoveColourProfile()
 	} else {
 		// vips 8.15+ tends to lose the colour profile during some color conversions.
 		// We need to backup the colour profile before the conversion and restore it later.
-		img.BackupColourProfile()
+		c.Img.BackupColourProfile()
 
-		if convertToLinear || !img.IsRGB() {
-			if err := img.ImportColourProfile(); err != nil {
-				return err
-			}
+		if err := c.Img.ImportColourProfile(); err != nil {
+			return err
 		}
 	}
 
-	if convertToLinear {
-		return img.LinearColourspace()
-	}
+	// Convert to processing colorspace
+	return c.Img.Colorspace(cs)
+}
 
-	return img.RgbColourspace()
+// guessTargetColorspace returns the colorspace to which the image should be saved.
+// If target format supports 16-bit colorspace, it will be preferred.
+func guessTargetColorspace(img *vips.Image, supports16Bit bool) vips.Interpretation {
+	format := img.GuessInterpretation()
+
+	switch format {
+	case vips.InterpretationRGB, vips.InterpretationSRGB, vips.InterpretationBW: // 3 bytes
+		return format // as is
+
+	case vips.InterpretationRGB16: // 3 uint16
+		if supports16Bit {
+			return format // as is
+		}
+		return vips.InterpretationSRGB
+
+	case vips.InterpretationGrey16: // 1 uint16
+		if supports16Bit {
+			return format // as is
+		}
+		return vips.InterpretationBW
+
+	case vips.InterpretationCMYK: // 4 bytes
+		return vips.InterpretationSRGB
+
+	default:
+		if supports16Bit {
+			return vips.InterpretationRGB16 // best effort
+		}
+		return vips.InterpretationSRGB // sRGB can be produced from any colorspace
+	}
 }

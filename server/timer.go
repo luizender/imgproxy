@@ -1,0 +1,49 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/imgproxy/imgproxy/v4/errctx"
+)
+
+// timerSinceCtxKey represents a context key for start time.
+type timerSinceCtxKey struct{}
+
+// StartRequestTimer starts a new request timer.
+func StartRequestTimer(r *http.Request, timeout time.Duration) (*http.Request, context.CancelFunc) {
+	ctx := r.Context()
+	ctx = context.WithValue(ctx, timerSinceCtxKey{}, time.Now())
+	ctx, cancel := context.WithTimeout(ctx, timeout) //nolint:gosec // cancel is called
+	return r.WithContext(ctx), cancel
+}
+
+// RequestDuration returns the duration since the timer started in the context.
+func RequestDuration(ctx context.Context) time.Duration {
+	if t, ok := ctx.Value(timerSinceCtxKey{}).(time.Time); ok {
+		return time.Since(t)
+	}
+	return 0
+}
+
+// CheckTimeout checks if the request context has timed out or cancelled and returns
+// wrapped error.
+func CheckTimeout(ctx context.Context) errctx.Error {
+	select {
+	case <-ctx.Done():
+		d := RequestDuration(ctx)
+
+		err := ctx.Err()
+		switch err {
+		case context.Canceled:
+			return newRequestCancelledError(d)
+		case context.DeadlineExceeded:
+			return newRequestTimeoutError(d)
+		default:
+			return errctx.Wrap(err)
+		}
+	default:
+		return nil
+	}
+}

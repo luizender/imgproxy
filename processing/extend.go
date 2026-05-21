@@ -1,14 +1,8 @@
 package processing
 
-import (
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
-)
-
-func extendImage(img *vips.Image, width, height int, gravity *options.GravityOptions, offsetScale float64) error {
-	imgWidth := img.Width()
-	imgHeight := img.Height()
+func extendImage(c *Context, width, height int, gravity *GravityOptions) error {
+	imgWidth := c.Img.Width()
+	imgHeight := c.Img.Height()
 
 	if width <= imgWidth && height <= imgHeight {
 		return nil
@@ -21,28 +15,30 @@ func extendImage(img *vips.Image, width, height int, gravity *options.GravityOpt
 		height = imgHeight
 	}
 
-	offX, offY := calcPosition(width, height, imgWidth, imgHeight, gravity, offsetScale, false)
-	return img.Embed(width, height, offX, offY)
+	offX, offY := calcPosition(width, height, imgWidth, imgHeight, gravity, c.DprScale, false)
+	return c.Img.Embed(width, height, offX, offY)
 }
 
-func extend(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if !po.Extend.Enabled {
+func (p *Processor) extend(c *Context) error {
+	if !c.PO.ExtendEnabled() {
 		return nil
 	}
 
-	width, height := pctx.targetWidth, pctx.targetHeight
-	return extendImage(img, width, height, &po.Extend.Gravity, pctx.dprScale)
+	width, height := c.TargetWidth, c.TargetHeight
+	gravity := c.PO.ExtendGravity()
+	return extendImage(c, width, height, &gravity)
 }
 
-func extendAspectRatio(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if !po.ExtendAspectRatio.Enabled {
+func (p *Processor) extendAspectRatio(c *Context) error {
+	if !c.PO.ExtendAspectRatioEnabled() {
 		return nil
 	}
 
-	width, height := pctx.extendAspectRatioWidth, pctx.extendAspectRatioHeight
+	width, height := c.ExtendAspectRatioWidth, c.ExtendAspectRatioHeight
 	if width == 0 || height == 0 {
 		return nil
 	}
 
-	return extendImage(img, width, height, &po.ExtendAspectRatio.Gravity, pctx.dprScale)
+	gravity := c.PO.ExtendAspectRatioGravity()
+	return extendImage(c, width, height, &gravity)
 }

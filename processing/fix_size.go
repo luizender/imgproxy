@@ -1,14 +1,12 @@
 package processing
 
 import (
+	"fmt"
+	"log/slog"
 	"math"
 
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/imagetype"
-	"github.com/imgproxy/imgproxy/v3/imath"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
-	log "github.com/sirupsen/logrus"
+	"github.com/imgproxy/imgproxy/v4/imagetype"
+	"github.com/imgproxy/imgproxy/v4/vips"
 )
 
 const (
@@ -20,7 +18,7 @@ const (
 )
 
 func fixWebpSize(img *vips.Image) error {
-	webpLimitShrink := float64(imath.Max(img.Width(), img.Height())) / webpMaxDimension
+	webpLimitShrink := float64(max(img.Width(), img.Height())) / webpMaxDimension
 
 	if webpLimitShrink <= 1.0 {
 		return nil
@@ -31,13 +29,16 @@ func fixWebpSize(img *vips.Image) error {
 		return err
 	}
 
-	log.Warningf("WebP dimension size is limited to %d. The image is rescaled to %dx%d", int(webpMaxDimension), img.Width(), img.Height())
+	slog.Warn(fmt.Sprintf(
+		"WebP dimension size is limited to %d. The image is rescaled to %dx%d",
+		int(webpMaxDimension), img.Width(), img.Height(),
+	))
 
 	return nil
 }
 
 func fixHeifSize(img *vips.Image) error {
-	heifLimitShrink := float64(imath.Max(img.Width(), img.Height())) / heifMaxDimension
+	heifLimitShrink := float64(max(img.Width(), img.Height())) / heifMaxDimension
 
 	if heifLimitShrink <= 1.0 {
 		return nil
@@ -48,7 +49,10 @@ func fixHeifSize(img *vips.Image) error {
 		return err
 	}
 
-	log.Warningf("AVIF/HEIC dimension size is limited to %d. The image is rescaled to %dx%d", int(heifMaxDimension), img.Width(), img.Height())
+	slog.Warn(fmt.Sprintf(
+		"AVIF/HEIC dimension size is limited to %d. The image is rescaled to %dx%d",
+		int(heifMaxDimension), img.Width(), img.Height(),
+	))
 
 	return nil
 }
@@ -56,7 +60,7 @@ func fixHeifSize(img *vips.Image) error {
 func fixGifSize(img *vips.Image) error {
 	gifMaxResolution := float64(vips.GifResolutionLimit())
 	gifResLimitShrink := float64(img.Width()*img.Height()) / gifMaxResolution
-	gifDimLimitShrink := float64(imath.Max(img.Width(), img.Height())) / gifMaxDimension
+	gifDimLimitShrink := float64(max(img.Width(), img.Height())) / gifMaxDimension
 
 	gifLimitShrink := math.Max(gifResLimitShrink, gifDimLimitShrink)
 
@@ -69,13 +73,16 @@ func fixGifSize(img *vips.Image) error {
 		return err
 	}
 
-	log.Warningf("GIF resolution is limited to %d and dimension size is limited to %d. The image is rescaled to %dx%d", int(gifMaxResolution), int(gifMaxDimension), img.Width(), img.Height())
+	slog.Warn(fmt.Sprintf(
+		"GIF resolution is limited to %d and dimension size is limited to %d. The image is rescaled to %dx%d",
+		int(gifMaxResolution), int(gifMaxDimension), img.Width(), img.Height(),
+	))
 
 	return nil
 }
 
 func fixIcoSize(img *vips.Image) error {
-	icoLimitShrink := float64(imath.Max(img.Width(), img.Height())) / icoMaxDimension
+	icoLimitShrink := float64(max(img.Width(), img.Height())) / icoMaxDimension
 
 	if icoLimitShrink <= 1.0 {
 		return nil
@@ -86,21 +93,24 @@ func fixIcoSize(img *vips.Image) error {
 		return err
 	}
 
-	log.Warningf("ICO dimension size is limited to %d. The image is rescaled to %dx%d", int(icoMaxDimension), img.Width(), img.Height())
+	slog.Warn(fmt.Sprintf(
+		"ICO dimension size is limited to %d. The image is rescaled to %dx%d",
+		int(icoMaxDimension), img.Width(), img.Height(),
+	))
 
 	return nil
 }
 
-func fixSize(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	switch po.Format {
+func (p *Processor) fixSize(c *Context) error {
+	switch c.PO.Format() {
 	case imagetype.WEBP:
-		return fixWebpSize(img)
+		return fixWebpSize(c.Img)
 	case imagetype.AVIF, imagetype.HEIC:
-		return fixHeifSize(img)
+		return fixHeifSize(c.Img)
 	case imagetype.GIF:
-		return fixGifSize(img)
+		return fixGifSize(c.Img)
 	case imagetype.ICO:
-		return fixIcoSize(img)
+		return fixIcoSize(c.Img)
 	}
 
 	return nil

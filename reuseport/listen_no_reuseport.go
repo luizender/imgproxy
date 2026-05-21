@@ -3,16 +3,13 @@
 package reuseport
 
 import (
+	"log/slog"
 	"net"
-
-	log "github.com/sirupsen/logrus"
-
-	"github.com/imgproxy/imgproxy/v3/config"
 )
 
-func Listen(network, address string) (net.Listener, error) {
-	if config.SoReuseport {
-		log.Warning("SO_REUSEPORT support is not implemented for your OS or Go version")
+func Listen(network, address string, reuse bool) (net.Listener, error) {
+	if reuse {
+		slog.Warn("SO_REUSEPORT support is not implemented for your OS or Go version")
 	}
 
 	return net.Listen(network, address)

@@ -1,0 +1,64 @@
+{
+    "image": "ghcr.io/imgproxy/imgproxy-base:v4.1.0",
+    "name": "imgproxy OSS",
+    "portsAttributes": {
+        "8081": {
+            "label": "imgproxy",
+            "onAutoForward": "notify"
+        },
+        "8091": {
+            "label": "Prometheus metrics",
+            "onAutoForward": "silent"
+        },
+        "8071": {
+            "label": "Utilities (pprof, etc.)",
+            "onAutoForward": "silent"
+        }
+    },
+    "containerEnv": {
+        "PORT": "8081",
+        "IMGPROXY_PROMETHEUS_BIND": ":8091",
+        "IMGPROXY_LOCAL_FILESYSTEM_ROOT": "/images",
+        "IMGPROXY_ENABLE_VIDEO_THUMBNAILS": "true",
+        "IMGPROXY_MAX_ANIMATION_FRAMES": "999",
+        "IMGPROXY_VIPS_LEAK_CHECK": "true",
+        "IMGPROXY_LOG_MEM_STATS": "true",
+        "IMGPROXY_DEVELOPMENT_ERRORS_MODE": "true"
+    },
+    "mounts": [
+        {
+            "source": "${localWorkspaceFolder}/.devcontainer/images",
+            "target": "/images",
+            "type": "bind"
+        },
+        {
+            "source": "${localWorkspaceFolder}/.tmp/_dev-root/.cache",
+            "target": "/root/.cache",
+            "type": "bind"
+        },
+        {
+            "source": "${localWorkspaceFolder}/.tmp/_dev-root/go/pkg/mod",
+            "target": "/root/go/pkg/mod",
+            "type": "bind"
+        },
+        {
+            "source": "${localWorkspaceFolder}/.tmp/_dev-root/.bash_history",
+            "target": "/root/.bash_history",
+            "type": "bind"
+        }
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "golang.go",
+                "ms-vscode.cpptools"
+            ]
+        }
+    },
+    "postCreateCommand": "lefthook install",
+    "initializeCommand": {
+        "createCacheDirs": "mkdir -p ${localWorkspaceFolder}/.tmp/_dev-root/.cache ${localWorkspaceFolder}/.tmp/_dev-root/go/pkg/mod",
+        "createBashHistory": "touch ${localWorkspaceFolder}/.tmp/_dev-root/.bash_history",
+        "linkImagesDir": "if [ ! -e ${localWorkspaceFolder}/.devcontainer/images ]; then ln -s ${localWorkspaceFolder}/testdata/test-images ${localWorkspaceFolder}/.devcontainer/images; fi"
+    }
+}

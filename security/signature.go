@@ -1,22 +1,25 @@
 package security
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-
-	"github.com/imgproxy/imgproxy/v3/config"
+	"slices"
+	"strings"
 )
 
-func VerifySignature(signature, path string) error {
-	if len(config.Keys) == 0 || len(config.Salts) == 0 {
+func (s *Checker) VerifySignature(ctx context.Context, signature, path string) error {
+	if len(s.config.Keys) == 0 || len(s.config.Salts) == 0 {
+		if strings.Contains(signature, ":") {
+			return newMalformedSignatureError(ctx)
+		}
+
 		return nil
 	}
 
-	for _, s := range config.TrustedSignatures {
-		if s == signature {
-			return nil
-		}
+	if slices.Contains(s.config.TrustedSignatures, signature) {
+		return nil
 	}
 
 	messageMAC, err := base64.RawURLEncoding.DecodeString(signature)
@@ -24,8 +27,8 @@ func VerifySignature(signature, path string) error {
 		return newSignatureError("Invalid signature encoding")
 	}
 
-	for i := 0; i < len(config.Keys); i++ {
-		if hmac.Equal(messageMAC, signatureFor(path, config.Keys[i], config.Salts[i], config.SignatureSize)) {
+	for i := range len(s.config.Keys) {
+		if hmac.Equal(messageMAC, signatureFor(path, s.config.Keys[i], s.config.Salts[i], s.config.SignatureSize)) {
 			return nil
 		}
 	}
@@ -36,6 +39,13 @@ func VerifySignature(signature, path string) error {
 func signatureFor(str string, key, salt []byte, signatureSize int) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(salt)
+
+	// It's supposed that path starts with '/'. However, if and input path comes with the
+	// leading slash split, let's re-add it here.
+	if str[0] != '/' {
+		mac.Write([]byte{'/'})
+	}
+
 	mac.Write([]byte(str))
 	expectedMAC := mac.Sum(nil)
 	if signatureSize < 32 {

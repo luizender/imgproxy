@@ -1,39 +1,37 @@
 package processing
 
-import (
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
-)
+func (p *Processor) rotateAndFlip(c *Context) error {
+	rotateAngle := c.PO.Rotate()
+	flipX := c.PO.FlipHorizontal()
+	flipY := c.PO.FlipVertical()
 
-func rotateAndFlip(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	shouldRotate := pctx.angle%360 != 0 || po.Rotate%360 != 0
-	shouldFlip := pctx.flip || po.Flip.Horizontal || po.Flip.Vertical
+	shouldRotate := c.Angle%360 != 0 || rotateAngle%360 != 0
+	shouldFlip := c.Flip || flipX || flipY
 
 	if !shouldRotate && !shouldFlip {
 		return nil
 	}
 
 	// We need the image in random access mode, so we copy it to memory.
-	if err := img.CopyMemory(); err != nil {
+	if err := c.Img.CopyMemory(); err != nil {
 		return err
 	}
 
 	// Rotate according to EXIF orientation
-	if err := img.Rotate(pctx.angle); err != nil {
+	if err := c.Img.Rotate(c.Angle); err != nil {
 		return err
 	}
 
 	// Flip according to EXIF orientation
-	if err := img.Flip(pctx.flip, false); err != nil {
+	if err := c.Img.Flip(c.Flip, false); err != nil {
 		return err
 	}
 
 	// Rotate according to user-specified options
-	if err := img.Rotate(po.Rotate); err != nil {
+	if err := c.Img.Rotate(rotateAngle); err != nil {
 		return err
 	}
 
 	// Flip according to user-specified options
-	return img.Flip(po.Flip.Horizontal, po.Flip.Vertical)
+	return c.Img.Flip(flipX, flipY)
 }

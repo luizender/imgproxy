@@ -3,91 +3,124 @@ package processing
 import (
 	"context"
 
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/imagetype"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/router"
-	"github.com/imgproxy/imgproxy/v3/vips"
+	"github.com/imgproxy/imgproxy/v4/imagedata"
+	"github.com/imgproxy/imgproxy/v4/server"
+	"github.com/imgproxy/imgproxy/v4/vips"
 )
 
-type pipelineContext struct {
-	ctx context.Context
+type Context struct {
+	// The context to check for timeouts and cancellations
+	Ctx context.Context //nolint:containedctx
 
-	imgtype imagetype.Type
+	// Current image being processed
+	Img *vips.Image
 
-	trimmed bool
+	// Processing options this pipeline runs with
+	PO ProcessingOptions
 
-	srcWidth  int
-	srcHeight int
-	angle     int
-	flip      bool
+	// Original image data
+	ImgData imagedata.ImageData
 
-	cropWidth   int
-	cropHeight  int
-	cropGravity options.GravityOptions
+	SrcWidth  int
+	SrcHeight int
+	Angle     int
+	Flip      bool
 
-	wscale float64
-	hscale float64
+	CropWidth   int
+	CropHeight  int
+	CropGravity GravityOptions
 
-	dprScale float64
+	WScale float64
+	HScale float64
+
+	DprScale float64
+
+	// The base shrink factor for vector images.
+	// It is used to downscale the input vector image to the maximum allowed resolution
+	VectorBaseShrink float64
 
 	// The width we aim to get.
 	// Based on the requested width scaled according to processing options.
 	// Can be 0 if width is not specified in the processing options.
-	targetWidth int
+	TargetWidth int
 	// The height we aim to get.
 	// Based on the requested height scaled according to processing options.
 	// Can be 0 if height is not specified in the processing options.
-	targetHeight int
+	TargetHeight int
 
 	// The width of the image after cropping, scaling and rotating
-	scaledWidth int
+	ScaledWidth int
 	// The height of the image after cropping, scaling and rotating
-	scaledHeight int
+	ScaledHeight int
 
 	// The width of the result crop according to the resizing type
-	resultCropWidth int
+	ResultCropWidth int
 	// The height of the result crop according to the resizing type
-	resultCropHeight int
+	ResultCropHeight int
 
 	// The width of the image extended to the requested aspect ratio.
 	// Can be 0 if any of the dimensions is not specified in the processing options
 	// or if the image already has the requested aspect ratio.
-	extendAspectRatioWidth int
+	ExtendAspectRatioWidth int
 	// The width of the image extended to the requested aspect ratio.
 	// Can be 0 if any of the dimensions is not specified in the processing options
 	// or if the image already has the requested aspect ratio.
-	extendAspectRatioHeight int
+	ExtendAspectRatioHeight int
 }
 
-type pipelineStep func(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error
-type pipeline []pipelineStep
+type Step func(c *Context) error
+type Pipeline []Step
 
-func (p pipeline) Run(ctx context.Context, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	pctx := pipelineContext{
-		ctx: ctx,
-
-		wscale: 1.0,
-		hscale: 1.0,
-
-		cropGravity: po.Crop.Gravity,
-	}
-
-	if pctx.cropGravity.Type == options.GravityUnknown {
-		pctx.cropGravity = po.Gravity
-	}
+// Run runs the given pipeline with the given parameters
+func (p Pipeline) Run(
+	ctx context.Context,
+	img *vips.Image,
+	po ProcessingOptions,
+	imgdata imagedata.ImageData,
+) error {
+	pctx := p.newContext(ctx, img, po, imgdata)
+	pctx.CalcParams()
 
 	for _, step := range p {
-		if err := step(&pctx, img, po, imgdata); err != nil {
+		if err := step(&pctx); err != nil {
 			return err
 		}
 
-		if err := router.CheckTimeout(ctx); err != nil {
+		if err := server.CheckTimeout(ctx); err != nil {
 			return err
 		}
 	}
 
-	img.SetDouble("imgproxy-dpr-scale", pctx.dprScale)
+	img.SetDouble("imgproxy-dpr-scale", pctx.DprScale)
 
 	return nil
+}
+
+func (p Pipeline) newContext(
+	ctx context.Context,
+	img *vips.Image,
+	po ProcessingOptions,
+	imgdata imagedata.ImageData,
+) Context {
+	pctx := Context{
+		Ctx:     ctx,
+		Img:     img,
+		PO:      po,
+		ImgData: imgdata,
+
+		WScale: 1.0,
+		HScale: 1.0,
+
+		DprScale:         1.0,
+		VectorBaseShrink: 1.0,
+
+		CropGravity: po.CropGravity(),
+	}
+
+	// If crop gravity is not set, use the general gravity option
+	if pctx.CropGravity.Type == GravityUnknown {
+		pctx.CropGravity = po.Gravity()
+	}
+
+	return pctx
 }

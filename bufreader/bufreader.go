@@ -1,103 +1,95 @@
 package bufreader
 
 import (
-	"bufio"
-	"bytes"
+	"errors"
 	"io"
 
-	"github.com/imgproxy/imgproxy/v3/imath"
+	"github.com/imgproxy/imgproxy/v4/ioutil"
 )
 
-type Reader struct {
-	r   io.Reader
-	buf *bytes.Buffer
-	cur int
+// ReadPeeker is an interface that combines io.Reader and a method to peek at the next n bytes
+type ReadPeeker interface {
+	io.Reader
+	Peek(n int) ([]byte, error) // Peek returns the next n bytes without advancing
 }
 
-func New(r io.Reader, buf *bytes.Buffer) *Reader {
+// Reader is a buffered reader that reads from an io.Reader and caches the data.
+type Reader struct {
+	r   io.Reader
+	buf []byte
+	pos int
+
+	finished bool // Indicates if the reader has reached EOF
+}
+
+// New creates new buffered reader
+func New(r io.Reader) *Reader {
 	br := Reader{
 		r:   r,
-		buf: buf,
+		buf: nil,
 	}
 	return &br
 }
 
+// Read reads data into p from the buffered reader.
 func (br *Reader) Read(p []byte) (int, error) {
-	if err := br.fill(br.cur + len(p)); err != nil {
+	if err := br.fetch(br.pos + len(p)); err != nil {
 		return 0, err
 	}
 
-	n := copy(p, br.buf.Bytes()[br.cur:])
-	br.cur += n
+	if br.pos >= len(br.buf) {
+		return 0, io.EOF // No more data to read
+	}
+
+	n := copy(p, br.buf[br.pos:])
+	br.pos += n
 	return n, nil
 }
 
-func (br *Reader) ReadByte() (byte, error) {
-	if err := br.fill(br.cur + 1); err != nil {
-		return 0, err
-	}
-
-	b := br.buf.Bytes()[br.cur]
-	br.cur++
-	return b, nil
-}
-
-func (br *Reader) Discard(n int) (int, error) {
-	if n < 0 {
-		return 0, bufio.ErrNegativeCount
-	}
-	if n == 0 {
-		return 0, nil
-	}
-
-	if err := br.fill(br.cur + n); err != nil {
-		return 0, err
-	}
-
-	n = imath.Min(n, br.buf.Len()-br.cur)
-	br.cur += n
-	return n, nil
-}
-
+// Peek returns the next n bytes from the buffered reader without advancing the position.
 func (br *Reader) Peek(n int) ([]byte, error) {
-	if n < 0 {
-		return []byte{}, bufio.ErrNegativeCount
-	}
-	if n == 0 {
-		return []byte{}, nil
+	if err := br.fetch(br.pos + n); err != nil {
+		return nil, err
 	}
 
-	if err := br.fill(br.cur + n); err != nil {
-		return []byte{}, err
+	if br.pos >= len(br.buf) {
+		return nil, io.EOF // No more data to read
 	}
 
-	if n > br.buf.Len()-br.cur {
-		return br.buf.Bytes()[br.cur:], io.EOF
-	}
-
-	return br.buf.Bytes()[br.cur : br.cur+n], nil
+	// Return slice of buffered data without advancing position
+	available := br.buf[br.pos:]
+	return available[:min(len(available), n)], nil
 }
 
-func (br *Reader) Flush() error {
-	_, err := br.buf.ReadFrom(br.r)
-	return err
+// Rewind seeks buffer to the beginning
+func (br *Reader) Rewind() {
+	br.pos = 0
 }
 
-func (br *Reader) fill(need int) error {
-	n := need - br.buf.Len()
-	if n <= 0 {
+// Pos returns the current read position.
+func (br *Reader) Pos() int {
+	return br.pos
+}
+
+// fetch ensures the buffer contains at least 'need' bytes
+func (br *Reader) fetch(need int) error {
+	if br.finished || need <= len(br.buf) {
 		return nil
 	}
 
-	n = imath.Max(4096, n)
+	b := make([]byte, need-len(br.buf))
+	n, err := ioutil.TryReadFull(br.r, b)
 
-	if _, err := br.buf.ReadFrom(io.LimitReader(br.r, int64(n))); err != nil {
+	if errors.Is(err, io.EOF) {
+		// If we reached EOF, we mark the reader as finished
+		br.finished = true
+	} else if err != nil {
 		return err
 	}
 
-	// Nothing was read, it's EOF
-	if br.cur == br.buf.Len() {
-		return io.EOF
+	if n > 0 {
+		// append only those which we read in fact
+		br.buf = append(br.buf, b[:n]...)
 	}
 
 	return nil

@@ -2,16 +2,20 @@
 
 BINARY := ./imgproxy
 
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 GOCMD := go
 GOBUILD := $(GOCMD) build
 GOCLEAN := $(GOCMD) clean
 GOTEST := $(GOCMD) test
 GOFMT := gofmt
 GOLINT := golangci-lint
+CLANG_FORMAT := clang-format
 GOTESTSUM := gotestsum
-SRCDIR := .
+SRCDIR := ./cli
 RCFILE := ./.imgproxyrc
 BREW_PREFIX :=
+DEVROOT_TMP_DIR ?= $(MAKEFILE_DIR).tmp/_dev-root
+BASE_IMAGE ?= ghcr.io/imgproxy/imgproxy-base:v4.1.0
 
 # Common environment setup for CGO builds
 ifneq ($(shell which brew),)
@@ -43,6 +47,23 @@ ifeq (build-and-run,$(firstword $(MAKECMDGOALS)))
 	RUN_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 endif
 
+# Wrapper action to run commands in Docker
+.PHONY: _run-in-docker
+_run-in-docker:
+ifdef IMGPROXY_IN_BASE_CONTAINER
+	@$(MAKE) $(DOCKERCMD)
+else
+	@mkdir -p ${DEVROOT_TMP_DIR}/.cache ${DEVROOT_TMP_DIR}/go/pkg/mod
+	@docker run --init --rm -it \
+		-v "$(MAKEFILE_DIR):/workspaces/imgproxy" \
+		-v "${DEVROOT_TMP_DIR}/.cache:/root/.cache" \
+		-v "${DEVROOT_TMP_DIR}/go/pkg/mod:/root/go/pkg/mod" \
+		-w /workspaces/imgproxy \
+		-e IMGPROXY_IN_BASE_CONTAINER=1 \
+		$(BASE_IMAGE) \
+		bash -c "make $(DOCKERCMD)"
+endif
+
 # Default target
 .PHONY: all
 all: build
@@ -61,7 +82,6 @@ clean:
 	echo $$PKG_CONFIG_PATH
 	@$(GOCLEAN)
 	rm -f $(BINARY)
-
 
 # Run imgproxy binary
 #
@@ -85,8 +105,10 @@ build-and-run: build run
 #
 # Usage:
 #	make test -- -run FooTest
-.PHONY: test
-test:
+.PHONY: test _test
+test: DOCKERCMD := _test
+test: _run-in-docker
+_test:
 ifneq ($(shell which $(GOTESTSUM)),)
 	@$(GOTESTSUM) ./...
 else
@@ -99,9 +121,22 @@ fmt:
 	@$(GOFMT) -s -w .
 
 # Lint code (requires golangci-lint installed)
-.PHONY: lint
-lint:
+.PHONY: lint-go _lint-go
+lint-go: DOCKERCMD := _lint-go
+lint-go: _run-in-docker
+_lint-go:
 	@$(GOLINT) run
+
+# Lint C code (requires clang-format installed)
+.PHONE: lint-clang _lint-clang
+ling-clang: DOCKERCMD := _lint-clang
+ling-clang: _run-in-docker
+_lint-clang:
+	 @find . -not -path "./.tmp/*" -not -path "./.git/*" \( -iname "*.h" -o -iname "*.c" -o -iname "*.cpp" \) | xargs $(CLANG_FORMAT) --dry-run --Werror
+
+# Run all linters
+.PHONY: lint
+lint: lint-go ling-clang
 
 # Upgrade direct Go dependencies
 .PHONY: upgrade
@@ -109,6 +144,25 @@ upgrade:
 	@$(GOCMD) mod tidy
 	@$(GOCMD) get $$($(GOCMD) list -f '{{if not (or .Main .Indirect)}}{{.Path}}{{end}}' -m all)
 	@$(GOCMD) mod tidy
+
+# Run lychee
+.PHONY: lychee _lychee
+lychee: DOCKERCMD := _lychee
+lychee: _run-in-docker
+_lychee:
+	@lychee README.md CHANGELOG.md
+
+.PHONY: devcontainer
+devcontainer:
+	devcontainer exec --workspace-folder $(MAKEFILE_DIR) bash
+
+.PHONY: update-gh-actions
+update-gh-actions:
+ifneq ($(shell which pinact),)
+	@pinact run -u --min-age 7
+else
+	$(error pinact is not installed. See installation instructions at https://github.com/suzuki-shunsuke/pinact/blob/main/INSTALL.md)
+endif
 
 # Make any unknown target do nothing to avoid "up to date" messages
 .PHONY: FORCE

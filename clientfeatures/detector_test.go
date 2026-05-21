@@ -1,0 +1,437 @@
+package clientfeatures_test
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+
+	"github.com/imgproxy/imgproxy/v4/clientfeatures"
+	"github.com/imgproxy/imgproxy/v4/httpheaders"
+	"github.com/imgproxy/imgproxy/v4/logger"
+)
+
+type detectorTestCase struct {
+	name     string
+	config   clientfeatures.Config
+	header   map[string]string
+	expected clientfeatures.Features
+}
+
+type ClientFeaturesDetectorSuite struct {
+	suite.Suite
+}
+
+func (s *ClientFeaturesDetectorSuite) SetupSuite() {
+	logger.Mute()
+}
+
+func (s *ClientFeaturesDetectorSuite) TearDownSuite() {
+	logger.Unmute()
+}
+
+func (s *ClientFeaturesDetectorSuite) runTestCases(testCases []detectorTestCase) {
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			detector := clientfeatures.NewDetector(&tc.config)
+
+			header := make(http.Header)
+			for k, v := range tc.header {
+				header.Set(k, v)
+			}
+
+			features := detector.Features(header)
+			s.Require().Equal(tc.expected, features)
+		})
+	}
+}
+
+func (s *ClientFeaturesDetectorSuite) TestFeaturesAutoFormats() {
+	s.runTestCases([]detectorTestCase{
+		{
+			name: "AutoWebP_ConainsWebP",
+			config: clientfeatures.Config{
+				AutoWebp: true,
+			},
+			header: map[string]string{
+				"Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{
+				PreferWebP: true,
+			},
+		},
+		{
+			name: "AutoWebP_DoesNotContainWebP",
+			config: clientfeatures.Config{
+				AutoWebp: true,
+			},
+			header: map[string]string{
+				"Accept": "image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "EnforceWebP_ContainsWebP",
+			config: clientfeatures.Config{
+				EnforceWebp: true,
+			},
+			header: map[string]string{
+				"Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{
+				PreferWebP:  true,
+				EnforceWebP: true,
+			},
+		},
+		{
+			name: "EnforceWebP_DoesNotContainWebP",
+			config: clientfeatures.Config{
+				EnforceWebp: true,
+			},
+			header: map[string]string{
+				"Accept": "image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "AutoAvif_ContainsAvif",
+			config: clientfeatures.Config{
+				AutoAvif: true,
+			},
+			header: map[string]string{
+				"Accept": "image/avif,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{
+				PreferAvif: true,
+			},
+		},
+		{
+			name: "AutoAvif_DoesNotContainAvif",
+			config: clientfeatures.Config{
+				AutoAvif: true,
+			},
+			header: map[string]string{
+				"Accept": "image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "EnforceAvif_ContainsAvif",
+			config: clientfeatures.Config{
+				EnforceAvif: true,
+			},
+			header: map[string]string{
+				"Accept": "image/avif,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{
+				PreferAvif:  true,
+				EnforceAvif: true,
+			},
+		},
+		{
+			name: "EnforceAvif_DoesNotContainAvif",
+			config: clientfeatures.Config{
+				EnforceAvif: true,
+			},
+			header: map[string]string{
+				"Accept": "image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "AutoJXL_ContainsJXL",
+			config: clientfeatures.Config{
+				AutoJxl: true,
+			},
+			header: map[string]string{
+				"Accept": "image/jxl,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{
+				PreferJxl: true,
+			},
+		},
+		{
+			name: "AutoJXL_DoesNotContainJXL",
+			config: clientfeatures.Config{
+				AutoJxl: true,
+			},
+			header: map[string]string{
+				"Accept": "image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "EnforceJXL_ContainsJXL",
+			config: clientfeatures.Config{
+				EnforceJxl: true,
+			},
+			header: map[string]string{
+				"Accept": "image/jxl,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{
+				PreferJxl:  true,
+				EnforceJxl: true,
+			},
+		},
+		{
+			name: "EnforceJXL_DoesNotContainJXL",
+			config: clientfeatures.Config{
+				EnforceJxl: true,
+			},
+			header: map[string]string{
+				"Accept": "image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "NoneEnabled_ContainsAll",
+			config: clientfeatures.Config{
+				AutoWebp:    false,
+				EnforceWebp: false,
+				AutoAvif:    false,
+				EnforceAvif: false,
+				AutoJxl:     false,
+				EnforceJxl:  false,
+			},
+			header: map[string]string{
+				"Accept": "image/webp,image/avif,image/jxl,image/apng,image/*,*/*;q=0.8",
+			},
+			expected: clientfeatures.Features{},
+		},
+	})
+}
+
+func (s *ClientFeaturesDetectorSuite) TestFeaturesClientHintsDPR() {
+	s.runTestCases([]detectorTestCase{
+		{
+			name: "ClientHintsEnabled_ValidDPR",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"DPR": "1.5",
+			},
+			expected: clientfeatures.Features{
+				ClientHintsDPR: 1.5,
+			},
+		},
+		{
+			name: "ClientHintsEnabled_ValidSecChDPR",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"Sec-CH-DPR": "2.0",
+			},
+			expected: clientfeatures.Features{
+				ClientHintsDPR: 2.0,
+			},
+		},
+		{
+			name: "ClientHintsEnabled_ValidDprAndSecChDPR",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"DPR":        "3.0",
+				"Sec-CH-DPR": "2.5",
+			},
+			expected: clientfeatures.Features{
+				ClientHintsDPR: 2.5,
+			},
+		},
+		{
+			name: "ClientHintsEnabled_InvalidDPR_Negative",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"DPR": "-1.0",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "ClientHintsEnabled_InvalidDPR_TooHigh",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"DPR": "10.0",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "ClientHintsEnabled_InvalidDPR_NonNumeric",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"DPR": "abc",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "ClientHintsDisabled",
+			config: clientfeatures.Config{
+				EnableClientHints: false,
+			},
+			header: map[string]string{
+				"DPR":        "2.0",
+				"Sec-CH-DPR": "3.0",
+			},
+			expected: clientfeatures.Features{},
+		},
+	})
+}
+
+func (s *ClientFeaturesDetectorSuite) TestFeaturesClientHintsWidth() {
+	s.runTestCases([]detectorTestCase{
+		{
+			name: "ClientHintsEnabled_ValidWidth",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"Width": "800",
+			},
+			expected: clientfeatures.Features{
+				ClientHintsWidth: 800,
+			},
+		},
+		{
+			name: "ClientHintsEnabled_ValidSecChWidth",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"Sec-CH-Width": "1024",
+			},
+			expected: clientfeatures.Features{
+				ClientHintsWidth: 1024,
+			},
+		},
+		{
+			name: "ClientHintsEnabled_ValidWidthAndSecChWidth",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"Width":        "1280",
+				"Sec-CH-Width": "1440",
+			},
+			expected: clientfeatures.Features{
+				ClientHintsWidth: 1440,
+			},
+		},
+		{
+			name: "ClientHintsEnabled_InvalidWidth_Negative",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"Width": "-800",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "ClientHintsEnabled_InvalidWidth_NonNumeric",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			header: map[string]string{
+				"Width": "abc",
+			},
+			expected: clientfeatures.Features{},
+		},
+		{
+			name: "ClientHintsDisabled",
+			config: clientfeatures.Config{
+				EnableClientHints: false,
+			},
+			header: map[string]string{
+				"Width":        "800",
+				"Sec-CH-Width": "1024",
+			},
+			expected: clientfeatures.Features{},
+		},
+	})
+}
+
+func (s *ClientFeaturesDetectorSuite) TestSetVary() {
+	testCases := []struct {
+		name     string
+		config   clientfeatures.Config
+		expected string
+	}{
+		{
+			name: "AutoWebP_Enabled",
+			config: clientfeatures.Config{
+				AutoWebp: true,
+			},
+			expected: "Accept",
+		},
+		{
+			name: "EnforceWebP_Enabled",
+			config: clientfeatures.Config{
+				EnforceWebp: true,
+			},
+			expected: "Accept",
+		},
+		{
+			name: "AutoAvif_Enabled",
+			config: clientfeatures.Config{
+				AutoAvif: true,
+			},
+			expected: "Accept",
+		},
+		{
+			name: "EnforceAvif_Enabled",
+			config: clientfeatures.Config{
+				EnforceAvif: true,
+			},
+			expected: "Accept",
+		},
+		{
+			name: "AutoJXL_Enabled",
+			config: clientfeatures.Config{
+				AutoJxl: true,
+			},
+			expected: "Accept",
+		},
+		{
+			name: "EnforceJXL_Enabled",
+			config: clientfeatures.Config{
+				EnforceJxl: true,
+			},
+			expected: "Accept",
+		},
+		{
+			name: "EnableClientHints_Enabled",
+			config: clientfeatures.Config{
+				EnableClientHints: true,
+			},
+			expected: "Sec-Ch-Dpr, Dpr, Sec-Ch-Width, Width",
+		},
+		{
+			name: "Combined",
+			config: clientfeatures.Config{
+				AutoWebp:          true,
+				EnableClientHints: true,
+			},
+			expected: "Accept, Sec-Ch-Dpr, Dpr, Sec-Ch-Width, Width",
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			detector := clientfeatures.NewDetector(&tc.config)
+			header := http.Header{}
+			detector.SetVary(header)
+			s.Require().Equal(tc.expected, header.Get(httpheaders.Vary))
+		})
+	}
+}
+
+func TestClientFeaturesDetector(t *testing.T) {
+	suite.Run(t, new(ClientFeaturesDetectorSuite))
+}

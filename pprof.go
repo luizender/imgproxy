@@ -1,6 +1,6 @@
 //go:build pprof
 
-package main
+package imgproxy
 
 import (
 	"net/http"

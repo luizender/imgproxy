@@ -1,25 +1,22 @@
 package processing
 
 import (
-	"github.com/imgproxy/imgproxy/v3/imagedata"
-	"github.com/imgproxy/imgproxy/v3/imath"
-	"github.com/imgproxy/imgproxy/v3/options"
-	"github.com/imgproxy/imgproxy/v3/vips"
+	"github.com/imgproxy/imgproxy/v4/imath"
 )
 
-func padding(pctx *pipelineContext, img *vips.Image, po *options.ProcessingOptions, imgdata *imagedata.ImageData) error {
-	if !po.Padding.Enabled {
+func (p *Processor) padding(c *Context) error {
+	if !c.PO.PaddingEnabled() {
 		return nil
 	}
 
-	paddingTop := imath.ScaleToEven(po.Padding.Top, pctx.dprScale)
-	paddingRight := imath.ScaleToEven(po.Padding.Right, pctx.dprScale)
-	paddingBottom := imath.ScaleToEven(po.Padding.Bottom, pctx.dprScale)
-	paddingLeft := imath.ScaleToEven(po.Padding.Left, pctx.dprScale)
+	paddingTop := imath.ScaleToEven(c.PO.PaddingTop(), c.DprScale)
+	paddingRight := imath.ScaleToEven(c.PO.PaddingRight(), c.DprScale)
+	paddingBottom := imath.ScaleToEven(c.PO.PaddingBottom(), c.DprScale)
+	paddingLeft := imath.ScaleToEven(c.PO.PaddingLeft(), c.DprScale)
 
-	return img.Embed(
-		img.Width()+paddingLeft+paddingRight,
-		img.Height()+paddingTop+paddingBottom,
+	return c.Img.Embed(
+		c.Img.Width()+paddingLeft+paddingRight,
+		c.Img.Height()+paddingTop+paddingBottom,
 		paddingLeft,
 		paddingTop,
 	)

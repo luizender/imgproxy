@@ -1,0 +1,49 @@
+package cookies
+
+import (
+	"errors"
+
+	"github.com/imgproxy/imgproxy/v4/ensure"
+	"github.com/imgproxy/imgproxy/v4/env"
+)
+
+var (
+	IMGPROXY_COOKIE_PASSTHROUGH     = env.Bool("IMGPROXY_COOKIE_PASSTHROUGH")
+	IMGPROXY_COOKIE_PASSTHROUGH_ALL = env.Bool("IMGPROXY_COOKIE_PASSTHROUGH_ALL")
+	IMGPROXY_COOKIE_BASE_URL        = env.String("IMGPROXY_COOKIE_BASE_URL")
+)
+
+// Config holds cookie-related configuration.
+type Config struct {
+	CookiePassthrough    bool
+	CookiePassthroughAll bool
+	CookieBaseURL        string
+}
+
+// NewDefaultConfig creates a new Config instance with default values.
+func NewDefaultConfig() Config {
+	return Config{
+		CookiePassthroughAll: false,
+		CookieBaseURL:        "",
+		CookiePassthrough:    false,
+	}
+}
+
+// LoadConfigFromEnv creates a new Config instance loading values from environment variables.
+func LoadConfigFromEnv(c *Config) (*Config, error) {
+	c = ensure.Ensure(c, NewDefaultConfig)
+
+	err := errors.Join(
+		IMGPROXY_COOKIE_PASSTHROUGH.Parse(&c.CookiePassthrough),
+		IMGPROXY_COOKIE_PASSTHROUGH_ALL.Parse(&c.CookiePassthroughAll),
+		IMGPROXY_COOKIE_BASE_URL.Parse(&c.CookieBaseURL),
+	)
+
+	return c, err
+}
+
+// Validate checks if the configuration is valid.
+func (c *Config) Validate() error {
+	// No validation needed for cookie config currently
+	return nil
+}

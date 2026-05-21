@@ -7,10 +7,29 @@
 #define VIPS_META_PALETTE_BITS_DEPTH "palette-bit-depth"
 
 #define IMGPROXY_META_ICC_NAME "imgproxy-icc-profile"
+#define IMGPROXY_ICC_IMPORTED "imgproxy-icc-imported"
 
 int
 vips_initialize()
 {
+  extern GType vips_foreign_load_bmp_source_get_type(void);
+  vips_foreign_load_bmp_source_get_type();
+
+  extern GType vips_foreign_load_bmp_buffer_get_type(void);
+  vips_foreign_load_bmp_buffer_get_type();
+
+  extern GType vips_foreign_save_bmp_target_get_type(void);
+  vips_foreign_save_bmp_target_get_type();
+
+  extern GType vips_foreign_load_ico_source_get_type(void);
+  vips_foreign_load_ico_source_get_type();
+
+  extern GType vips_foreign_load_ico_buffer_get_type(void);
+  vips_foreign_load_ico_buffer_get_type();
+
+  extern GType vips_foreign_save_ico_target_get_type(void);
+  vips_foreign_save_ico_target_get_type();
+
   return vips_init("imgproxy");
 }
 
@@ -48,82 +67,116 @@ vips_health()
 }
 
 int
-vips_jpegload_go(void *buf, size_t len, int shrink, VipsImage **out)
+check_shrink(const char *function, double shrink)
 {
-  if (shrink > 1)
-    return vips_jpegload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, "shrink", shrink,
-        NULL);
+  if (shrink != 0)
+    return 0;
 
-  return vips_jpegload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, NULL);
+  vips_error(function, "shrink can't be 0");
+  return -1;
 }
 
+// loads jpeg from a source
 int
-vips_jxlload_go(void *buf, size_t len, int pages, VipsImage **out)
+vips_jpegload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  return vips_jxlload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, "n", pages, NULL);
+  return check_shrink("vips_jpegload_source_go", lo.Shrink) ||
+      vips_jpegload_source(
+          VIPS_SOURCE(source), out,
+          "access", VIPS_ACCESS_SEQUENTIAL,
+          "shrink", (int) lo.Shrink,
+          NULL);
 }
 
+// loads xjl from source
 int
-vips_pngload_go(void *buf, size_t len, VipsImage **out, int unlimited)
+vips_jxlload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  return vips_pngload_buffer(
-      buf, len, out,
+  return vips_jxlload_source(
+      VIPS_SOURCE(source), out,
       "access", VIPS_ACCESS_SEQUENTIAL,
-      "unlimited", unlimited,
+      "page", lo.Page,
+      "n", lo.Pages,
       NULL);
 }
 
 int
-vips_webpload_go(void *buf, size_t len, double scale, int pages, VipsImage **out)
+vips_pngload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  return vips_webpload_buffer(
-      buf, len, out,
+  return vips_pngload_source(
+      VIPS_SOURCE(source), out,
       "access", VIPS_ACCESS_SEQUENTIAL,
-      "scale", scale,
-      "n", pages,
+      "unlimited", lo.PngUnlimited,
       NULL);
 }
 
 int
-vips_gifload_go(void *buf, size_t len, int pages, VipsImage **out)
+vips_webpload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  return vips_gifload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, "n", pages, NULL);
+  return check_shrink("vips_webpload_source_go", lo.Shrink) ||
+      vips_webpload_source(
+          VIPS_SOURCE(source), out,
+          "access", VIPS_ACCESS_SEQUENTIAL,
+          "scale", 1.0 / lo.Shrink,
+          "page", lo.Page,
+          "n", lo.Pages,
+          NULL);
 }
 
 int
-vips_svgload_go(void *buf, size_t len, double scale, VipsImage **out, int unlimited)
+vips_gifload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  // libvips limits the minimal scale to 0.001, so we have to scale down dpi
-  // for lower scale values
-  double dpi = 72.0;
-  if (scale < 0.001) {
-    dpi *= VIPS_MAX(scale / 0.001, 0.001);
-    scale = 0.001;
-  }
+  return vips_gifload_source(
+      VIPS_SOURCE(source), out,
+      "access", VIPS_ACCESS_SEQUENTIAL,
+      "page", lo.Page,
+      "n", lo.Pages,
+      NULL);
+}
 
-  return vips_svgload_buffer(
-      buf, len, out,
+int
+vips_svgload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
+{
+  if (check_shrink("vips_svgload_source_go", lo.Shrink))
+    return -1;
+
+  double scale = 1.0 / lo.Shrink;
+
+  /* libvips uses default DPI of 72, but W3C recommends 96.
+   */
+  double dpi = 96.0;
+  /* Adjust the scale to account for the difference in DPI so that the output size is correct.
+   */
+  scale = scale * 72.0 / dpi;
+
+  return vips_svgload_source(
+      VIPS_SOURCE(source), out,
       "access", VIPS_ACCESS_SEQUENTIAL,
       "scale", scale,
       "dpi", dpi,
-      "unlimited", unlimited,
+      "unlimited", lo.SvgUnlimited,
       NULL);
 }
 
 int
-vips_heifload_go(void *buf, size_t len, VipsImage **out, int thumbnail)
+vips_heifload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  return vips_heifload_buffer(
-      buf, len, out,
+  return vips_heifload_source(
+      VIPS_SOURCE(source), out,
       "access", VIPS_ACCESS_SEQUENTIAL,
-      "thumbnail", thumbnail,
+      "thumbnail", lo.Thumbnail,
       NULL);
 }
 
 int
-vips_tiffload_go(void *buf, size_t len, VipsImage **out)
+vips_tiffload_source_go(VipsImgproxySource *source, VipsImage **out, ImgproxyLoadOptions lo)
 {
-  return vips_tiffload_buffer(buf, len, out, "access", VIPS_ACCESS_SEQUENTIAL, NULL);
+  return vips_tiffload_source(
+      VIPS_SOURCE(source), out,
+      "access", VIPS_ACCESS_SEQUENTIAL,
+      "page", lo.Page,
+      "n", lo.Pages,
+      NULL);
 }
 
 int
@@ -292,16 +345,29 @@ vips_band_format(VipsImage *in)
 }
 
 gboolean
-vips_is_animated(VipsImage *in)
+vips_image_is_animated(VipsImage *in)
 {
   int n_pages;
 
   return (vips_image_get_typeof(in, "delay") != G_TYPE_INVALID &&
       vips_image_get_typeof(in, "loop") != G_TYPE_INVALID &&
-      vips_image_get_typeof(in, "page-height") == G_TYPE_INT &&
       vips_image_get_typeof(in, "n-pages") == G_TYPE_INT &&
       vips_image_get_int(in, "n-pages", &n_pages) == 0 &&
       n_pages > 1);
+}
+
+int
+vips_image_remove_animation(VipsImage *in, VipsImage **out)
+{
+  if (vips_copy(in, out, NULL))
+    return -1;
+
+  vips_image_remove(*out, "delay");
+  vips_image_remove(*out, "loop");
+  vips_image_remove(*out, "page-height");
+  vips_image_remove(*out, "n-pages");
+
+  return 0;
 }
 
 int
@@ -477,6 +543,9 @@ vips_icc_restore(VipsImage *in, VipsImage **out)
 int
 vips_icc_import_go(VipsImage *in, VipsImage **out)
 {
+  if (vips_image_get_typeof(in, IMGPROXY_ICC_IMPORTED) != 0)
+    return vips_copy(in, out, NULL);
+
   VipsImage *base = vips_image_new();
   VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 5);
 
@@ -518,7 +587,7 @@ vips_icc_import_go(VipsImage *in, VipsImage **out)
     }
   }
 
-  vips_image_set_int(*out, "imgproxy-icc-imported", 1);
+  vips_image_set_int(*out, IMGPROXY_ICC_IMPORTED, 1);
 
   VIPS_UNREF(base);
 
@@ -526,21 +595,94 @@ vips_icc_import_go(VipsImage *in, VipsImage **out)
 }
 
 int
+image_depth(VipsImage *in)
+{
+  switch (in->Type) {
+  case VIPS_INTERPRETATION_GREY16:
+  case VIPS_INTERPRETATION_RGB16:
+  case VIPS_INTERPRETATION_scRGB:
+    return 16;
+  default:
+    return 8;
+  }
+}
+
+// vips_guard_colorspace ensures that the image is in a suitable colorspace
+// (sRGB, RGB16, B_W or GREY16) we know of and can process. If mustOutputRGB
+// is true, a grayscale image will be converted to colorful version.
+int
+vips_guard_colorspace(VipsImage *in, VipsImage **out, gboolean mustOutputRGB)
+{
+  VipsInterpretation interp = vips_image_guess_interpretation(in);
+  VipsInterpretation out_interp = interp;
+  VipsBandFormat fmt;
+
+  switch (interp) {
+  case VIPS_INTERPRETATION_B_W:
+    if (mustOutputRGB) {
+      out_interp = VIPS_INTERPRETATION_sRGB;
+    }
+    break; // otherwise keep B_W
+
+  case VIPS_INTERPRETATION_GREY16:
+    if (mustOutputRGB) {
+      out_interp = VIPS_INTERPRETATION_RGB16;
+    }
+    break; // otherwise keep GREY16
+
+  // formally, this could be handled by default case, but
+  // the probability of scRGB is high enough so let's save
+  // vips_image_get_format call
+  case VIPS_INTERPRETATION_scRGB:
+    out_interp = VIPS_INTERPRETATION_RGB16;
+    break;
+
+  // keep as is
+  case VIPS_INTERPRETATION_sRGB:
+  case VIPS_INTERPRETATION_RGB16:
+    break;
+
+  // 8 bit anything becomes sRGB, 16+ bit anything becomes RGB16
+  default:
+    fmt = vips_image_get_format(in);
+
+    if ((fmt == VIPS_FORMAT_UCHAR) || (fmt == VIPS_FORMAT_CHAR)) {
+      out_interp = VIPS_INTERPRETATION_sRGB;
+    }
+    else {
+      out_interp = VIPS_INTERPRETATION_RGB16;
+    }
+    break;
+  }
+
+  return vips_colourspace(in, out, out_interp, NULL);
+}
+
+int
 vips_icc_export_go(VipsImage *in, VipsImage **out)
 {
-  return vips_icc_export(in, out, "pcs", vips_icc_get_pcs(in), NULL);
+  return vips_icc_export(
+      in, out,
+      "pcs", vips_icc_get_pcs(in),
+      "depth", image_depth(in),
+      NULL);
 }
 
 int
-vips_icc_export_srgb(VipsImage *in, VipsImage **out)
+vips_icc_transform_standard(VipsImage *in, VipsImage **out)
 {
-  return vips_icc_export(in, out, "output_profile", "sRGB", "pcs", vips_icc_get_pcs(in), NULL);
-}
+  const char *profile =
+      (in->Type == VIPS_INTERPRETATION_B_W || in->Type == VIPS_INTERPRETATION_GREY16)
+      ? "sGrey"
+      : "sRGB";
 
-int
-vips_icc_transform_srgb(VipsImage *in, VipsImage **out)
-{
-  return vips_icc_transform(in, out, "sRGB", "embedded", TRUE, "pcs", vips_icc_get_pcs(in), NULL);
+  return vips_icc_transform(
+      in, out,
+      profile,
+      "embedded", TRUE,
+      "pcs", vips_icc_get_pcs(in),
+      "depth", image_depth(in),
+      NULL);
 }
 
 int
@@ -693,9 +835,33 @@ vips_flatten_go(VipsImage *in, VipsImage **out, RGB bg)
   if (!vips_image_hasalpha(in))
     return vips_copy(in, out, NULL);
 
+  // When color is specified and it is not gray, we need
+  // to convert the image to RGB first.
+  VipsImage *base = vips_image_new();
+  VipsImage **t = (VipsImage **) vips_object_local_array(VIPS_OBJECT(base), 2);
+
+  gboolean isBWColor = (bg.r == bg.g && bg.r == bg.b);
+
+  if (vips_guard_colorspace(in, &t[0], !isBWColor)) {
+    VIPS_UNREF(base);
+    return 1;
+  }
+
+  in = t[0];
+
+  // If the image is 16-bit, scale the background color accordingly
+  if (image_depth(in) == 16) {
+    bg.r = bg.r * 257.0;
+    bg.g = bg.g * 257.0;
+    bg.b = bg.b * 257.0;
+  }
+
   VipsArrayDouble *bga = vips_array_double_newv(3, bg.r, bg.g, bg.b);
   int res = vips_flatten(in, out, "background", bga, NULL);
   vips_area_unref((VipsArea *) bga);
+
+  VIPS_UNREF(base);
+
   return res;
 }
 
@@ -868,10 +1034,19 @@ vips_apply_watermark(VipsImage *in, VipsImage *watermark, VipsImage **out, int l
 
   int had_alpha = vips_image_hasalpha(in);
 
+  VipsInterpretation cs = in->Type;
+
+  // Image is black and white but watermark is not: we need to convert image to colored
+  if ((cs == VIPS_INTERPRETATION_B_W || cs == VIPS_INTERPRETATION_GREY16) &&
+      (watermark->Type != VIPS_INTERPRETATION_B_W && watermark->Type != VIPS_INTERPRETATION_GREY16)) {
+
+    cs = (cs == VIPS_INTERPRETATION_B_W) ? VIPS_INTERPRETATION_sRGB : VIPS_INTERPRETATION_RGB16;
+  }
+
   if (
       vips_composite2(
           in, watermark, &t[5], VIPS_BLEND_MODE_OVER,
-          "x", left, "y", top, "compositing_space", in->Type,
+          "x", left, "y", top, "compositing_space", cs,
           NULL) ||
       vips_cast(t[5], &t[6], vips_image_get_format(in), NULL)) {
     VIPS_UNREF(base);
@@ -1001,38 +1176,39 @@ vips_strip_all(VipsImage *in, VipsImage **out)
 }
 
 int
-vips_jpegsave_go(VipsImage *in, void **buf, size_t *len, int quality, int interlace)
+vips_jpegsave_go(VipsImage *in, VipsTarget *target, int quality, ImgproxySaveOptions opts)
 {
-  return vips_jpegsave_buffer(
-      in, buf, len,
+  return vips_jpegsave_target(
+      in, target,
       "Q", quality,
       "optimize_coding", TRUE,
-      "interlace", interlace,
+      "interlace", opts.JpegProgressive,
       NULL);
 }
 
 int
-vips_jxlsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort)
+vips_jxlsave_go(VipsImage *in, VipsTarget *target, int quality, ImgproxySaveOptions opts)
 {
-  return vips_jxlsave_buffer(
-      in, buf, len,
+  return vips_jxlsave_target(
+      in, target,
       "Q", quality,
-      "effort", effort,
+      "effort", opts.JxlEffort,
       NULL);
 }
 
 int
-vips_pngsave_go(VipsImage *in, void **buf, size_t *len, int interlace, int quantize, int colors)
+vips_pngsave_go(VipsImage *in, VipsTarget *target, ImgproxySaveOptions opts)
 {
+  int quantize = opts.PngQuantize;
   int bitdepth;
 
   if (quantize) {
     bitdepth = 1;
-    if (colors > 16)
+    if (opts.PngQuantizationColors > 16)
       bitdepth = 8;
-    else if (colors > 4)
+    else if (opts.PngQuantizationColors > 4)
       bitdepth = 4;
-    else if (colors > 2)
+    else if (opts.PngQuantizationColors > 2)
       bitdepth = 2;
   }
   else {
@@ -1043,70 +1219,70 @@ vips_pngsave_go(VipsImage *in, void **buf, size_t *len, int interlace, int quant
       else if (bitdepth > 2)
         bitdepth = 4;
       quantize = 1;
-      colors = 1 << bitdepth;
     }
   }
 
   if (!quantize)
-    return vips_pngsave_buffer(
-        in, buf, len,
+    return vips_pngsave_target(
+        in, target,
         "filter", VIPS_FOREIGN_PNG_FILTER_ALL,
-        "interlace", interlace,
+        "interlace", opts.PngInterlaced,
         NULL);
 
-  return vips_pngsave_buffer(
-      in, buf, len,
+  return vips_pngsave_target(
+      in, target,
       "filter", VIPS_FOREIGN_PNG_FILTER_NONE,
-      "interlace", interlace,
+      "interlace", opts.PngInterlaced,
       "palette", quantize,
       "bitdepth", bitdepth,
       NULL);
 }
 
 int
-vips_webpsave_go(VipsImage *in, void **buf, size_t *len, int quality, int effort, VipsForeignWebpPreset preset)
+vips_webpsave_go(VipsImage *in, VipsTarget *target, int quality, ImgproxySaveOptions opts)
 {
-  return vips_webpsave_buffer(
-      in, buf, len,
+  return vips_webpsave_target(
+      in, target,
       "Q", quality,
-      "effort", effort,
-      "preset", preset,
+      "effort", opts.WebpEffort,
+      "preset", opts.WebpPreset,
       NULL);
 }
 
 int
-vips_gifsave_go(VipsImage *in, void **buf, size_t *len)
+vips_gifsave_go(VipsImage *in, VipsTarget *target, ImgproxySaveOptions opts)
 {
   int bitdepth = vips_get_palette_bit_depth(in);
   if (bitdepth <= 0 || bitdepth > 8)
     bitdepth = 8;
-  return vips_gifsave_buffer(in, buf, len, "bitdepth", bitdepth, NULL);
+  return vips_gifsave_target(in, target, "bitdepth", bitdepth, NULL);
 }
 
 int
-vips_tiffsave_go(VipsImage *in, void **buf, size_t *len, int quality)
+vips_tiffsave_go(VipsImage *in, VipsTarget *target, int quality, ImgproxySaveOptions opts)
 {
-  return vips_tiffsave_buffer(in, buf, len, "Q", quality, NULL);
+  return vips_tiffsave_target(in, target, "Q", quality, NULL);
 }
 
 int
-vips_heifsave_go(VipsImage *in, void **buf, size_t *len, int quality)
+vips_heifsave_go(VipsImage *in, VipsTarget *target, int quality, ImgproxySaveOptions opts)
 {
-  return vips_heifsave_buffer(
-      in, buf, len,
+  return vips_heifsave_target(
+      in, target,
       "Q", quality,
+      "bitdepth", 8, // Despite what docs say, >8 bit is not supported
       "compression", VIPS_FOREIGN_HEIF_COMPRESSION_HEVC,
       NULL);
 }
 
 int
-vips_avifsave_go(VipsImage *in, void **buf, size_t *len, int quality, int speed)
+vips_avifsave_go(VipsImage *in, VipsTarget *target, int quality, ImgproxySaveOptions opts)
 {
-  return vips_heifsave_buffer(
-      in, buf, len,
+  return vips_heifsave_target(
+      in, target,
       "Q", quality,
       "compression", VIPS_FOREIGN_HEIF_COMPRESSION_AV1,
-      "effort", 9 - speed,
+      "effort", 9 - opts.AvifSpeed,
       NULL);
 }
 
@@ -1115,4 +1291,31 @@ vips_cleanup()
 {
   vips_error_clear();
   vips_thread_shutdown();
+}
+
+void
+vips_error_go(const char *function, const char *message)
+{
+  vips_error(function, "%s", message);
+}
+
+int
+vips_foreign_load_read_full(VipsSource *source, void *buf, size_t len)
+{
+  while (len > 0) {
+    ssize_t n = vips_source_read(source, buf, len);
+    if (n <= 0)
+      return n;
+
+    buf = (uint8_t *) buf + n;
+    len -= n;
+  }
+
+  return 1;
+}
+
+void
+vips_unref_target(VipsTarget *target)
+{
+  VIPS_UNREF(target);
 }
